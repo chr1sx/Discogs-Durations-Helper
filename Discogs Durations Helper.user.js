@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Durations Helper
 // @namespace    https://github.com/chr1sx
-// @version      1.0
+// @version      1.1
 // @description  Extracts durations from track titles and moves them to duration fields
 // @match        https://www.discogs.com/release/edit/*
 // @grant        none
@@ -25,15 +25,17 @@
     function resetHideTimer() {
         if (hideTimeout) {
             clearTimeout(hideTimeout);
+            console.log('[Discogs Durations Helper] Cleared previous timer');
         }
         hideTimeout = setTimeout(() => {
-            const panel = document.getElementById('durations-helpe-panel');
+            const panel = document.getElementById('durations-helper-panel');
+            console.log('[Discogs Durations Helper] Timer fired! Panel exists:', !!panel, 'Display:', panel?.style.display);
             if (panel && panel.style.display !== 'none') {
                 panel.style.display = 'none';
-                console.log('[Discogs Durations Helper] Panel auto-hidden after 18 seconds');
+                console.log('[Discogs Durations Helper] Panel hidden successfully');
             }
         }, 18500);
-        console.log('[Discogs Durations Helper] Hide timer reset - 18 seconds');
+        console.log('[Discogs Durations Helper] New 18-second timer started at', new Date().toLocaleTimeString());
     }
 
     // Helper function to set value in React inputs
@@ -68,29 +70,30 @@
             width: 255px;
             background: white;
             border: 1px solid #ccc;
-            border-radius: 4px;
+            border-radius: 8px;
             box-shadow: -2px 2px 8px rgba(0,0,0,0.1);
             z-index: 10000;
             font-family: Arial, sans-serif;
+            overflow: hidden;
         `;
 
         panel.innerHTML = `
-            <div style="background: #1A1D1E; color: white; padding: 8px 12px; border-radius: 0 4px 0 0; display: flex; justify-content: space-between; align-items: center;">
+            <div style="background: #1A1D1E; color: white; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center;">
                 <strong style="font-size: 13px;">⏱ Discogs Durations Helper</strong>
                 <button id="close-panel" style="background: none; border: none; color: white; font-size: 18px; cursor: pointer; padding: 0 5px; line-height: 1;">✕</button>
             </div>
             <div style="padding: 12px; box-sizing: border-box;">
-                <button id="scan-and-extract" style="width: 100%; padding: 10px; background: #28a745; color: white; border: none; border-radius: 3px; cursor: pointer; font-weight: bold; font-size: 13px; transition: background 0.2s; box-sizing: border-box;">
+                <button id="scan-and-extract" style="width: 100%; padding: 10px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 13px; transition: background 0.2s; box-sizing: border-box;">
                     🔍 Scan & Extract
                 </button>
-                <div id="track-info" style="background: #f8f9fa; padding: 8px; border-radius: 3px; margin-top: 10px; font-size: 12px; display: none; box-sizing: border-box; text-align: center;">
+                <div id="track-info" style="background: #f8f9fa; padding: 8px; border-radius: 5px; margin-top: 10px; font-size: 12px; display: none; box-sizing: border-box; text-align: center;">
                 </div>
                 <div id="log-section" style="margin-top: 10px; display: none; box-sizing: border-box;">
                     <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 6px 0; box-sizing: border-box;" id="log-toggle">
                         <strong style="font-size: 11px; color: #666;">Activity Log</strong>
                         <span id="log-arrow" style="font-size: 10px; color: #666;">▼</span>
                     </div>
-                    <div id="log-container" style="max-height: 200px; overflow-y: auto; font-size: 10px; font-family: monospace; background: #f8f9fa; padding: 6px; border-radius: 3px; display: none; box-sizing: border-box;">
+                    <div id="log-container" style="max-height: 200px; overflow-y: auto; font-size: 10px; font-family: monospace; background: #f8f9fa; padding: 6px; border-radius: 5px; display: none; box-sizing: border-box;">
                     </div>
                 </div>
             </div>
@@ -109,12 +112,14 @@
 
         // Add event listeners for user interaction to reset timer
         panel.addEventListener('mouseenter', () => {
-            console.log('[Discogs Durations Helper] Mouse entered panel');
+            console.log('[Discogs Durations Helper] Mouse entered panel - resetting timer');
             resetHideTimer();
         });
-        panel.addEventListener('mousemove', resetHideTimer);
-        panel.addEventListener('click', resetHideTimer);
-        panel.addEventListener('scroll', resetHideTimer, true);
+
+        panel.addEventListener('mouseleave', () => {
+            console.log('[Discogs Durations Helper] Mouse left panel - resetting timer');
+            resetHideTimer();
+        });
 
         const scanBtn = document.getElementById('scan-and-extract');
         scanBtn.onmouseover = () => scanBtn.style.background = '#218838';
