@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Edit Helper
 // @namespace    https://github.com/chr1sx/Discogs-Edit-Helper
-// @version      1.9.2
+// @version      1.9.4
 // @description  Imports metadata from web stores and plain-text tracklists, extracts info from titles and assigns data to the appropriate fields
 // @author       chr1sx
 // @match        https://www.discogs.com/release/edit/*
@@ -1769,6 +1769,8 @@
         if (numPrefixM) {
             const ampmM = core.match(/^(\d+)(am|pm)$/i);
             if (ampmM) return ampmM[1] + ampmM[2].toUpperCase();
+            const ordinalM = core.match(/^(\d+)(st|nd|rd|th)$/i);
+            if (ordinalM) return ordinalM[1] + ordinalM[2].toLowerCase();
             return numPrefixM[1] + numPrefixM[2].toUpperCase() + numPrefixM[3].toLowerCase();
         }
         if (state.capitalizeMixedCase && /\p{Lu}/u.test(core.slice(1)) && /\p{Ll}/u.test(core)) {
@@ -5146,7 +5148,7 @@
 
     const CREDIT_ROLE_MAP = [
 
-        [/^compos(?:ed|ers?|ing|ition)?(?:\s+by)?$/i,                                                'Composed By'],
+        [/^compos(?:ed|ers?|ing|itions?)?(?:\s+by)?$/i,                                                'Composed By'],
         [/^compositon(?:\s+by)?$/i,                                                                  'Composed By'],
         [/^composted(?:\s+by)?$/i,                                                                   'Composed By'],
         [/^(?:(?:all[- ](?:songs?|music)[\s-]?|music[\s-]?|songs?[\s-]?)?writ(?:er|ing|ten))(?:\s+by)?$/i, 'Written-By'],
@@ -5156,12 +5158,12 @@
         [/^(?:all\s+(?:original\s+)?)?(?:words?|text)(?:\s+writ(?:er|ing|ten))?(?:\s+by)?$/i,    'Words By'],
         [/^(?:all\s+)?music(?:\s+by)?$/i,                                                           'Music By'],
         [/^songwrit(?:ers?|ing)(?:\s+by)?$/i,                                                        'Songwriter'],
-        [/^adapt(?:ed|ation)?(?:\s+by)?$/i,                                                          'Adapted By'],
+        [/^adapt(?:ed|ations?)?(?:\s+by)?$/i,                                                          'Adapted By'],
 
-        [/^arrang(?:ed|ers?|ing|ement)(?:\s+by)?$/i,                                                 'Arranged By'],
+        [/^arrang(?:ed|ers?|ing)(?:\s+by)?$/i,                                                        'Arranged By'],
         [/^arang(?:ed|ers?|ing|ement)?(?:\s+by)?$/i,                                                'Arranged By'],
         [/^arrangment(?:\s+by)?$/i,                                                                  'Arranged By'],
-        [/^orchestrat(?:ed|ion|er)(?:\s+by)?$/i,                                                     'Orchestrated By'],
+        [/^orchestrat(?:ed|ions?|er)(?:\s+by)?$/i,                                                     'Orchestrated By'],
         [/^conduct(?:ed|or)(?:\s+by)?$/i,                                                            'Conductor'],
 
         [/^(?:additional[- ])?(?:produced?|producer|production)(?:\s+by)?$/i,                        'Producer'],
@@ -5194,7 +5196,7 @@
         [/^sound[- ]design(?:er|ed)?$/i,                                                              'Sound Designer'],
         [/^lacquer[- ]cut(?:\s+by)?$/i,                                                              'Lacquer Cut By'],
 
-        [/^(?:performed?|performers?|performance)(?:\s+by)?$/i,                                      'Performer'],
+        [/^(?:performed?|performers?|performances?)(?:\s+by)?$/i,                                      'Performer'],
         [/^band(?:[- ]?(?:members?|is))?$/i,                                                          'Band'],
         [/^(?:all\s+)?instruments?(?:\s+by)?$/i,                                                    'Instruments'],
 
@@ -5257,7 +5259,7 @@
         [/^photgraphy(?:\s+by)?$/i,                                                                  'Photography By'],
         [/^photograhpy(?:\s+by)?$/i,                                                                 'Photography By'],
         [/^photogrpahy(?:\s+by)?$/i,                                                                 'Photography By'],
-        [/^(?:illustration|illustrat(?:or|ed))(?:\s+by)?$/i,                                        'Illustration'],
+        [/^(?:illustrations?|illustrat(?:or|ed))(?:\s+by)?$/i,                                        'Illustration'],
         [/^ilustrat(?:ion|or|ed)?(?:\s+by)?$/i,                                                     'Illustration'],
         [/^illustrtion(?:\s+by)?$/i,                                                                 'Illustration'],
         [/^fonts?(?:\s+by)?$/i,                                                                      'Typography'],
@@ -5650,7 +5652,6 @@
         ['art layout design',         [{ official: 'Artwork', bracket: 'Art' }, 'Layout', 'Design']],
         ['artwork photography',        ['Artwork', 'Photography By']],
         ['graphic layout',             [{ official: 'Layout', bracket: 'Graphic Layout' }]],
-        ['graphic design',             ['Graphic Design']],
         ['graphic design layout',      ['Graphic Design', 'Layout']],
         ['sleeve design',             ['Sleeve', 'Design']],
         ['sleeve art',                ['Sleeve', { official: 'Artwork', bracket: 'Art' }]],
@@ -5695,6 +5696,8 @@
         ['spoken words',              [{ official: 'Words By', bracket: 'Spoken Word' }]],
         ['spoken',                    [{ official: 'Words By', bracket: 'Spoken Word' }]],
         ['designed',                  [{ official: 'Design', bracket: 'Designed' }]],
+        ['arrangement',               [{ official: 'Arranged By', bracket: 'Arrangements' }]],
+        ['arrangements',              [{ official: 'Arranged By', bracket: 'Arrangements' }]],
         ['co-written',                [{ official: 'Written-By', bracket: 'Co-Written' }]],
         ['co-written with',           [{ official: 'Written-By', bracket: 'Co-Written With' }]],
         ['cowritten',                 [{ official: 'Written-By', bracket: 'Co-Written' }]],
@@ -5759,7 +5762,7 @@
         const allPrefix = /^(?:(?:all\s+)?(?:all\s+original\s+)?(?:music|songs?|tracks?)|album|remixes?|original(?:ly)?|cover|additional|add(?:'t|\.t|`t|t|\.)|session)\s+/i;
         let sStripped = s;
         while (allPrefix.test(sStripped)) sStripped = sStripped.replace(allPrefix, '').trim();
-        sStripped = sStripped.replace(/\s*,?\s*\b(?:on|for)\s+(?:(?:CD|disc|vinyl|tape|side|lp|ep)\s+\w+\s+)?(?:tracks?\s+)?[\d\s,&\-\u2013]+(?:\s+and\s+\d+)?\s*$/gi, '').trim();
+        sStripped = sStripped.replace(/\s*,?\s*\b(?:on|for)\s+(?:the\s+)?(?:CD|disc|vinyl|tape|lp|ep|digital|streaming)(?:\s+(?:edition|version|release))?\s*$|\s*,?\s*\b(?:on|for)\s+(?:(?:CD|disc|vinyl|tape|side|lp|ep)\s+\w+\s+)?(?:tracks?\s+)?[\d\s,&\-\u2013]+(?:\s+and\s+\d+)?\s*$/gi, '').trim();
         const _instRecM = sStripped.match(/^(.+?)\s+recorded(?:\s+by)?$/i);
         if (_instRecM) {
             const inst = _instRecM[1].trim().toLowerCase().replace(/(^|\s)(\p{L})/gu, (_, sp, c) => sp + c.toUpperCase());
@@ -5917,12 +5920,18 @@
             const exceptSynonymRe = /\b(?:except|apart\s+from|excluding|with\s+the\s+exception\s+of)\b/i;
             const exceptM = l.match(exceptSynonymRe);
             if (!exceptM) return [l];
-            const tail = l.slice(exceptM.index + exceptM[0].length);
+            const stripTrailingParen = (s) => s.replace(/[)(]+$/, '').trim();
+            let beforeExcept = l.slice(0, exceptM.index).trim().replace(/[.,;]+$/, '').trim();
+            let workingLine = l;
+            if (/\($/.test(beforeExcept) && /\)\s*$/.test(l)) {
+                beforeExcept = stripTrailingParen(beforeExcept);
+                workingLine = l.replace(/\)\s*$/, '');
+            }
+            const tail = workingLine.slice(exceptM.index + exceptM[0].length);
             const extra = [];
             const knownRoleKw = 'written|vocalized|vocalize|composed|lyrics|music|arranged|produced|mastered|mixed|performed|sung|played|recorded|engineered|edited|programmed|designed|illustrated|photographed|artwork|remixed';
             const rolePosRe = new RegExp(`\\b(${knownRoleKw})\\s+by\\s+`, 'gi');
             const stopRe = new RegExp(`\\s*/\\s*|\\s+(?:${knownRoleKw})\\s+by\\s`, 'i');
-            const beforeExcept = l.slice(0, exceptM.index).trim().replace(/[.,;]+$/, '').trim();
             const inheritedRoleM = beforeExcept.match(new RegExp(`\\b(${knownRoleKw})\\s+by\\b`, 'i'));
             const inheritedRole = inheritedRoleM ? inheritedRoleM[1].toLowerCase() : null;
             const naiveClauses = tail.split(/\s*(?:,\s*and|\s+and|,)\s+(?=(?:tracks?\s+)?\d)/i);
@@ -5944,16 +5953,16 @@
                 while ((m = rolePosRe.exec(roleBody)) !== null) {
                     const afterBy = roleBody.slice(m.index + m[0].length);
                     const stopIdx = afterBy.search(stopRe);
-                    const nameStr = (stopIdx === -1 ? afterBy : afterBy.slice(0, stopIdx)).trim().replace(/[.,;]+$/, '');
+                    const nameStr = stripTrailingParen((stopIdx === -1 ? afterBy : afterBy.slice(0, stopIdx)).trim().replace(/[.,;]+$/, ''));
                     if (nameStr) { extra.push(`${trackPrefix}${m[1].toLowerCase()} by ${nameStr}`); foundRole = true; }
                 }
                 if (!foundRole && inheritedRole) {
                     const bareByM = roleBody.match(/^by\s+(.+)/i);
                     if (bareByM) {
-                        const nameStr = bareByM[1].trim().replace(/[.,;]+$/, '');
+                        const nameStr = stripTrailingParen(bareByM[1].trim().replace(/[.,;]+$/, ''));
                         if (nameStr) extra.push(`${trackPrefix}${inheritedRole} by ${nameStr}`);
                     } else if (roleBody.trim()) {
-                        const nameStr = roleBody.replace(/^by\s+/i, '').trim().replace(/[.,;]+$/, '');
+                        const nameStr = stripTrailingParen(roleBody.replace(/^by\s+/i, '').trim().replace(/[.,;]+$/, ''));
                         if (nameStr) extra.push(`${trackPrefix}${inheritedRole} by ${nameStr}`);
                     }
                 }
@@ -6398,6 +6407,28 @@
         return results;
     }
 
+    const BANDCAMP_CATNO_RE = /\bcatalog(?:ue)?\.?\s*(?:number|no\.?|#)?\s*[:\-]?\s*#?\s*([A-Z][A-Z0-9]{0,9}(?:[\s\-][A-Z0-9]{1,10}){0,3})\b|\bcat\.?\s*(?:(?:no\.?|nr\.?|number)\s*[:\-]?\s*#?\s*([A-Z][A-Z0-9]{0,9}(?:[\s\-][A-Z0-9]{1,10}){0,3})|#\s*[:\-]?\s*([A-Z][A-Z0-9]{0,9}(?:[\s\-][A-Z0-9]{1,10}){0,3})|:\s*#?\s*([A-Z][A-Z0-9]{0,9}(?:[\s\-][A-Z0-9]{1,10}){0,3}))\b/i;
+
+    function parseBandcampCatno(doc) {
+        const creditsEl = doc.querySelector('div.tralbumData.tralbum-credits');
+        if (creditsEl) {
+            const m = (creditsEl.textContent || '').match(BANDCAMP_CATNO_RE);
+            if (m) return { catno: (m[1] || m[2] || m[3] || m[4]).trim(), source: 'credits' };
+        }
+
+        const aboutEl = doc.querySelector('div.tralbumData.tralbum-about');
+        if (aboutEl) {
+            const lines = (aboutEl.textContent || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+            for (const line of lines) {
+                if (line.length > 60) continue;
+                const m = line.match(BANDCAMP_CATNO_RE);
+                if (m) return { catno: (m[1] || m[2] || m[3] || m[4]).trim(), source: 'notes' };
+            }
+        }
+
+        return { catno: null, source: null };
+    }
+
     function parseBandcampCredits(doc) {
         const toLines = (el) => el.innerHTML
             .replace(/<br\s*\/?>/gi, '\n')
@@ -6410,7 +6441,7 @@
             .split('\n').map(l => l.trim()).filter(Boolean);
 
         const expandInlineTrackLists = (lines) => {
-            const inlineRe = /,\s*(?=(?:(?:Tracks?|Tacks?|Tracsk?|Traks?|Trakcs?|Trcaks?|Tarck s?)\s+)?\d+\s+(?!\d|[&]|and\s).*?\bby\b)/i;
+            const inlineRe = /(?<!\d),\s*(?=(?:(?:Tracks?|Tacks?|Tracsk?|Traks?|Trakcs?|Trcaks?|Tarck s?)\s+)?\d+\s+(?!\d|[&]|and\s).*?\bby\b)/i;
             return lines.flatMap(l => {
                 if (!inlineRe.test(l)) return [l];
                 const segs = l.split(inlineRe).map(s => s.trim()).filter(Boolean);
@@ -6776,10 +6807,12 @@
 
         const { credits, source: creditsSource } = parseBandcampCredits(doc);
         const creditsSourceInfo = creditsSource;
+        const { catno: parsedCatno, source: catnoSource } = parseBandcampCatno(doc);
 
         return {
             artist, title, label,
-            catno: tralbum.current?.sku || null,
+            catno: parsedCatno || null,
+            catnoSource: parsedCatno ? catnoSource : null,
             date, publishDate, tracks, imageUrl, tags, credits, creditsSource: creditsSourceInfo,
             bitdepth, samplerate, fileType, freeText, country, preferPublishDate,
             storeName: 'Bandcamp',
@@ -6810,7 +6843,17 @@
                     releaseData.artists = albumArtists.length > 1 ? albumArtists : undefined;
                     releaseData.label = rel.label?.name || rel.label;
                     releaseData.catno = rel.catalog_number || rel.catalog;
-                    releaseData.date = (rel.publish_date || rel.release_date || "").slice(0, 10);
+                    const _rawRelease = rel.new_release_date || rel.release_date || '';
+                    const _rawPublish = rel.publish_date || '';
+                    releaseData.date = _rawRelease.slice(0, 10);
+                    const _publishNorm = _rawPublish.slice(0, 10);
+                    releaseData.publishDate = (_publishNorm && _publishNorm !== releaseData.date) ? _publishNorm : '';
+                    if (!releaseData.date && releaseData.publishDate) {
+                        releaseData.date = releaseData.publishDate;
+                        releaseData.publishDate = '';
+                    }
+                    const BEATPORT_LAUNCH_DATE = '2005-01-07';
+                    releaseData.preferPublishDate = !!(releaseData.date && releaseData.date < BEATPORT_LAUNCH_DATE && releaseData.publishDate && releaseData.publishDate >= BEATPORT_LAUNCH_DATE);
                 }
 
                 if (jsonTracks && jsonTracks.length > 0) {
@@ -9587,8 +9630,8 @@ function wiConvertImageToJpeg(blob, maxDim = 600) {
         return results;
     }
 
-    function buildDraftPayload(data, sourceUrl) {
-        const { label, catno, date, bitdepth, samplerate, fileType, freeText: dataFreeText, country: dataCountry } = data;
+    function buildDraftPayload(data, sourceUrl, dateFieldUsed = 'date') {
+        const { label, catno, date, publishDate, bitdepth, samplerate, fileType, freeText: dataFreeText, country: dataCountry } = data;
         const cf = state.capitalizeFields;
         const capIf = (flag, s) => flag && s ? capitalizeTitleString(s) : s;
         const title   = capIf(cf.albumTitle, data.title) || '';
@@ -9691,9 +9734,15 @@ function wiConvertImageToJpeg(blob, maxDim = 600) {
             });
         })();
 
-        const submissionNotes = sourceUrl
-            ? `Metadata imported with Discogs Edit Helper.\nRelease URL: ${sourceUrl}`
-            : 'Metadata imported with Discogs Edit Helper.';
+        const submissionNotes = (() => {
+            let notes = sourceUrl
+                ? `Metadata imported with Discogs Edit Helper.\nRelease URL: ${sourceUrl}`
+                : 'Metadata imported with Discogs Edit Helper.';
+            if (sourceUrl && date && publishDate && dateFieldUsed === 'publishDate') {
+                notes += '\n\n' + `Both the publish date (${date}) and release date (${publishDate}) were available. The publish date was selected because it reflects when the release was actually made public.`;
+            }
+            return notes;
+        })();
 
         const payload = {
             title,
@@ -9816,12 +9865,12 @@ function wiConvertImageToJpeg(blob, maxDim = 600) {
         return attempt(0);
     }
 
-    async function wiSaveReleaseAsDraft(data, sourceUrl) {
+    async function wiSaveReleaseAsDraft(data, sourceUrl, dateFieldUsed = 'date') {
         await setInfoProcessing();
         log(`Saving release from ${data.storeName || 'store'} as draft...`, 'info');
 
         try {
-            const built = buildDraftPayload(data, sourceUrl);
+            const built = buildDraftPayload(data, sourceUrl, dateFieldUsed);
 
             const basePayload = JSON.parse(built.full_data);
 
@@ -9906,8 +9955,8 @@ function wiConvertImageToJpeg(blob, maxDim = 600) {
         }
     }
 
-    async function wiApplyRelease(data, sourceUrl = '', existingShield = null) {
-        const { label, catno, date, imageUrl, bitdepth, samplerate, fileType, freeText: dataFreeText, storeName, country: dataCountry } = data;
+    async function wiApplyRelease(data, sourceUrl = '', existingShield = null, dateFieldUsed = 'date') {
+        const { label, catno, date, publishDate, imageUrl, bitdepth, samplerate, fileType, freeText: dataFreeText, storeName, country: dataCountry } = data;
         const cf = state.capitalizeFields;
         const capIf = (flag, s) => flag && s ? capitalizeTitleString(s) : s;
         const title   = capIf(cf.albumTitle, data.title);
@@ -10101,8 +10150,11 @@ function wiConvertImageToJpeg(blob, maxDim = 600) {
                 const snEl = document.querySelector('#release-submission-notes-textarea')
                     || await withTimeout(wiWaitForElement('#release-submission-notes-textarea', 3000), 5000, 'Submission notes textarea');
                 if (snEl) {
-                    const urlLine = 'Metadata imported with Discogs Edit Helper.\nRelease URL: ' + sourceUrl;
-                    const existing = snEl.value.replace(/Metadata imported with Discogs Edit Helper\.\n?Release URL:.*$/m, '').trimEnd();
+                    let urlLine = 'Metadata imported with Discogs Edit Helper.\nRelease URL: ' + sourceUrl;
+                    if (date && publishDate && dateFieldUsed === 'publishDate') {
+                        urlLine += '\n\n' + `Both the publish date (${date}) and release date (${publishDate}) were available. The publish date was selected because it reflects when the release was actually made public.`;
+                    }
+                    const existing = snEl.value.replace(/Metadata imported with Discogs Edit Helper\.\n?Release URL:.*$/ms, '').trimEnd();
                     const newVal = existing ? existing + '\n' + urlLine : urlLine;
                     wiSetTextareaValue(snEl, newVal);
                     log('Submission Notes: release URL added', 'success');
@@ -10654,13 +10706,19 @@ wiIsAntiBotPage(html)) {
             const isDiscogs = _isDiscogsUrl(val);
             if (supportedSpan) supportedSpan.style.display = isDiscogs ? 'none' : '';
             const name = val ? detectStoreName(val) : '';
-            savedraftWrap.style.opacity = isDiscogs ? '0.45' : '1';
-            savedraftWrap.style.pointerEvents = isDiscogs ? 'none' : 'auto';
-            savedraftWrap.title = isDiscogs ? "Not available for Discogs credits import — there's no new release to create a draft of" : '';
-            applyArrow.style.pointerEvents = isDiscogs ? 'none' : 'auto';
-            applyArrow.style.cursor = isDiscogs ? 'not-allowed' : 'pointer';
-            applyArrow.title = isDiscogs ? 'No apply variants available for Discogs credits import' : '';
-            if (isDiscogs) applyMenu.style.display = 'none';
+            if (isDiscogs) {
+                savedraftWrap.style.opacity = '0.45';
+                savedraftWrap.style.pointerEvents = 'none';
+                savedraftWrap.title = "Not available for Discogs credits import — there's no new release to create a draft of";
+                applyArrow.style.pointerEvents = 'none';
+                applyArrow.style.cursor = 'not-allowed';
+                applyArrow.title = 'No apply variants available for Discogs credits import';
+                applyMenu.style.display = 'none';
+            } else {
+                savedraftWrap.title = '';
+                applyArrow.style.cursor = 'pointer';
+                applyArrow.title = '';
+            }
         });
 
         urlInput.addEventListener('keydown', e => { if (e.key === 'Enter') fetchBtn.click(); });
@@ -10799,13 +10857,13 @@ wiIsAntiBotPage(html)) {
                     if (_datePart && _publishPart && _datePart !== _publishPart) {
                         const dateActive = selectedDateField === 'date';
                         dateSegmentHtml =
-                            `<span class="dh-wi-date-pick${dateActive ? ' dh-wi-date-active' : ''}" data-field="date" title="Release date — click to use this one" style="cursor:pointer;padding:0 2px;border-radius:2px;${dateActive ? '' : 'opacity:.55;'}">${esc(_datePart)}</span>` +
+                            `<span class="dh-wi-date-pick${dateActive ? ' dh-wi-date-active' : ''}" data-field="date" title="Release date — click to use this one" style="cursor:pointer;padding:0 2px;border-radius:2px;${dateActive ? '' : 'opacity:.55;'}">${esc(_datePart)} (Rel.)</span>` +
                             `<span style="opacity:.4;"> / </span>` +
                             `<span class="dh-wi-date-pick${dateActive ? '' : ' dh-wi-date-active'}" data-field="publishDate" title="Publish date — click to use this one instead" style="cursor:pointer;padding:0 2px;border-radius:2px;${dateActive ? 'opacity:.55;' : ''}">${esc(_publishPart)} (Pub.)</span>`;
                     } else {
                         dateSegmentHtml = esc(_datePart);
                     }
-                    const WI_LABEL_LINE_CHAR_BUDGET = 42;
+                    const WI_LABEL_LINE_CHAR_BUDGET = 60;
                     const WI_LABEL_MIN_CHARS = 8;
                     const fitLabelForWiMeta = (labelText, catnoText, countryText) => {
                         if (!labelText) return labelText;
@@ -10816,15 +10874,17 @@ wiIsAntiBotPage(html)) {
                         return `${labelText.slice(0, truncLen).trimEnd()}...`;
                     };
                     const wiResolvedCountry = (state.importCountry && fetchedData.country) ? fetchedData.country : 'Worldwide';
-                    const buildMetaLineHtmlEsc = (labelText) => [esc(fitLabelForWiMeta(labelText, fetchedData.catno, wiResolvedCountry)), esc(fetchedData.catno), esc(wiResolvedCountry), dateSegmentHtml].filter(Boolean).join(' · ');
-                    const metaLineClampStyle = 'display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;text-overflow:ellipsis;line-height:1.35;max-height:2.7em;';
+                    const buildMetaLineHtmlEsc = (labelText) => [esc(fitLabelForWiMeta(labelText, fetchedData.catno, wiResolvedCountry)), esc(fetchedData.catno), esc(wiResolvedCountry)].filter(Boolean).join(' · ');
+                    const metaLineClampStyle = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                    const line3Base = [`${fetchedData.tracks.length} track${fetchedData.tracks.length !== 1 ? 's' : ''}`, fetchedData.fileType || 'FLAC', (fetchedData.bitdepth && fetchedData.samplerate) ? `${fetchedData.bitdepth}-bit/${fetchedData.samplerate / 1000} kHz` : (fetchedData.freeText || null)].filter(Boolean).map(esc).join(' · ');
+                    const line3Html = dateSegmentHtml ? `${line3Base}${line3Base ? ' · ' : ''}${dateSegmentHtml}` : line3Base;
                     previewEl.innerHTML = `
                         <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">
                             ${imgHtml}
                             <div style="min-width:0;flex:1;overflow:hidden;">
                                 <div style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(fetchedData.artist)}${fetchedData.artist && fetchedData.title ? ' – ' : ''}${esc(fetchedData.title)}</div>
                                 <div id="dh-wi-meta-line" style="color:#888;font-size:10px;${metaLineClampStyle}">${buildMetaLineHtmlEsc(fetchedData.label)}</div>
-                                <div style="color:#888;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${[`${fetchedData.tracks.length} track${fetchedData.tracks.length !== 1 ? 's' : ''}`, fetchedData.fileType || 'FLAC', (fetchedData.bitdepth && fetchedData.samplerate) ? `${fetchedData.bitdepth}-bit/${fetchedData.samplerate / 1000} kHz` : (fetchedData.freeText || null), esc(fetchedData.storeName)].filter(Boolean).join(' · ')}</div>
+                                <div style="color:#888;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${line3Html}</div>
                             </div>
                         </div>
                         <div style="display:flex;gap:2px;margin-bottom:5px;border-bottom:1px solid rgba(0,0,0,0.08);">
@@ -11141,6 +11201,8 @@ wiIsAntiBotPage(html)) {
         const _storeApply = async () => {
             if (!fetchedData) return;
             overlay.style.display = 'none';
+            applyMenu.style.display = 'none';
+            draftMenu.style.display = 'none';
             resetHideTimer();
             await setInfoProcessing();
             const _isReimport = state.actionHistory.some(a => a.type === 'webImport');
@@ -11225,7 +11287,7 @@ wiIsAntiBotPage(html)) {
                         await wiSmartCleanupForReimport(fetchedData);
                         await new Promise(r => setTimeout(r, 300));
                     }
-                    await wiApplyRelease(getFilteredFetchedData(), urlInput.value.trim(), _outerShield);
+                    await wiApplyRelease(getFilteredFetchedData(), urlInput.value.trim(), _outerShield, selectedDateField);
                 }
             } catch(e) { log('Apply error: ' + e.message, 'error'); _outerShield.restoreAll(); }
             finally { if (_savedCap) state.capitalizeFields = _savedCap; if (_noSplitMode) { state.splitImport = _savedSplit; state.importAutoFeat = _savedAutoFeat; state.importAutoRemixers = _savedAutoRmx; } _noCapMode = false; _creditsOnlyMode = false; _durationsOnlyMode = false; _noSplitMode = false; }
@@ -11462,6 +11524,8 @@ wiIsAntiBotPage(html)) {
             const filteredDiscogsCredits = getFilteredDiscogsCredits();
             if (!_discogsData || !filteredDiscogsCredits.length) return;
             overlay.style.display = 'none';
+            applyMenu.style.display = 'none';
+            draftMenu.style.display = 'none';
             resetHideTimer();
             await setInfoProcessing();
             const _shield = wiActivateShield('Discogs');
@@ -11496,9 +11560,9 @@ wiIsAntiBotPage(html)) {
         const _isDiscogsUrl = (val) => /discogs\.com\/release\/\d+|discogs\.com\/.*\/release\/\d+|^\d{5,}$/.test(val.trim());
 
         fetchBtn.onclick = () => { if (_isDiscogsUrl(urlInput.value)) _discogsFetch(); else _storeFetch(); };
-        applyBtn.onclick = () => { if (_isDiscogsUrl(urlInput.value)) _discogsApply(); else _storeApply(); };
+        applyBtn.onclick = () => { applyMenu.style.display = 'none'; if (_isDiscogsUrl(urlInput.value)) _discogsApply(); else _storeApply(); };
 
-        const close = () => { overlay.style.display = 'none'; };
+        const close = () => { overlay.style.display = 'none'; applyMenu.style.display = 'none'; draftMenu.style.display = 'none'; };
         cancelBtn.onclick = close;
         closeBtn.onclick  = close;
 
@@ -11515,7 +11579,7 @@ wiIsAntiBotPage(html)) {
             const _savedAutoRmx  = _noSplitMode ? state.importAutoRemixers : null;
             if (_noSplitMode) { state.splitImport = false; state.importAutoFeat = false; state.importAutoRemixers = false; }
             try {
-                await wiSaveReleaseAsDraft(getFilteredFetchedData(), urlInput.value.trim());
+                await wiSaveReleaseAsDraft(getFilteredFetchedData(), urlInput.value.trim(), selectedDateField);
                 close();
             } catch (e) {
                 log(`Save to Draft failed: ${e.message}`, 'error');
@@ -11533,6 +11597,7 @@ wiIsAntiBotPage(html)) {
 
         savedraftBtn.onclick = (e) => {
             if (e) { e.preventDefault(); e.stopPropagation(); }
+            draftMenu.style.display = 'none';
             _saveDraft();
         };
 
