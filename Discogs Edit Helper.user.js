@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Edit Helper
 // @namespace    https://github.com/chr1sx/Discogs-Edit-Helper
-// @version      1.9.4
+// @version      1.9.5
 // @description  Imports metadata from web stores and plain-text tracklists, extracts info from titles and assigns data to the appropriate fields
 // @author       chr1sx
 // @match        https://www.discogs.com/release/edit/*
@@ -39,8 +39,9 @@
         REMIX_PATTERNS: ['remix', 'rmx', 'rebuild'],
         REMIX_BY_PATTERNS: ['remixed by', 'remix by', 'rmx by', 'rebuild by', 'rebuilt by', 'reworked by', 'rework by', 'edited by', 'edit by', 'mixed by', 'mix by', 'version by', 'dub by'],
         REMIX_PATTERNS_OPTIONAL: ['dub', 'edit', 'rework', 'mix', 'version'],
-        CAPITALIZE_KEEP_UPPER: ['II', 'III', 'IV', 'VI', 'VII', 'VIII', 'IX', 'CIA', 'DJ', 'DNA', 'EP', 'FBI', 'FM', 'HD', 'KGB', 'LSD', 'MC', 'MI6', 'NASA', 'TNT', 'UFO', 'UK', 'USA', 'USSR', 'VIP', 'VHS', 'WTF'],
+        CAPITALIZE_KEEP_UPPER: ['CIA', 'DJ', 'DNA', 'EP', 'FBI', 'FM', 'HD', 'KGB', 'LSD', 'MC', 'MI6', 'NASA', 'TNT', 'UFO', 'UK', 'USA', 'USSR', 'VIP', 'VHS', 'WTF'],
         CAPITALIZE_KEEP_LOWER: ['da', 'de', 'del', 'des', 'di', 'la', 'van', 'von'],
+        MEASUREMENT_UNITS: ['mm', 'cm', 'm', 'km', 'in', 'yd', 'mi', 'kg', 'mg', 'lb', 'oz', 'ml', 'mph', 'km/h'],
         CLEAN_TITLE_PATTERNS: ['original mix', 'explicit', 'previously unreleased', 'unreleased', 'digital bonus track', 'digital bonus', 'bonus track', 'bonus', '24bit', '24-bit', '24 bit', '16bit', '16-bit', '16 bit', '000 bpm']
     };
     const CONFIG_RAW = {
@@ -51,8 +52,9 @@
         REMIX_PATTERNS:           ['remix', 'rmx', 'rebuild'],
         REMIX_BY_PATTERNS:        ['remixed by', 'remix by', 'rmx by', 'rebuild by', 'rebuilt by', 'reworked by', 'rework by', 'edited by', 'edit by', 'mixed by', 'mix by', 'version by', 'dub by'],
         REMIX_PATTERNS_OPTIONAL:  ['dub', 'edit', 'rework', 'mix', 'version'],
-        CAPITALIZE_KEEP_UPPER:    ['II', 'III', 'IV', 'VI', 'VII', 'VIII', 'IX', 'CIA', 'DJ', 'DNA', 'EP', 'FBI', 'FM', 'HD', 'KGB', 'LSD', 'MC', 'MI6', 'NASA', 'TNT', 'UFO', 'UK', 'USA', 'USSR', 'VIP', 'VHS', 'WTF'],
+        CAPITALIZE_KEEP_UPPER:    ['CIA', 'DJ', 'DNA', 'EP', 'FBI', 'FM', 'HD', 'KGB', 'LSD', 'MC', 'MI6', 'NASA', 'TNT', 'UFO', 'UK', 'USA', 'USSR', 'VIP', 'VHS', 'WTF'],
         CAPITALIZE_KEEP_LOWER:    ['da', 'de', 'del', 'des', 'di', 'la', 'van', 'von'],
+        MEASUREMENT_UNITS:        ['mm', 'cm', 'm', 'km', 'in', 'yd', 'mi', 'kg', 'mg', 'lb', 'oz', 'ml', 'mph', 'km/h'],
         CLEAN_TITLE_PATTERNS:     ['original mix', 'explicit', 'previously unreleased', 'unreleased', 'digital bonus track', 'digital bonus', 'bonus track', 'bonus', '24bit', '24-bit', '24 bit', '16bit', '16-bit', '16 bit', '000 bpm'],
     };
 
@@ -66,6 +68,7 @@
         REMIX_PATTERNS_OPTIONAL:   [...CONFIG_RAW.REMIX_PATTERNS_OPTIONAL],
         CAPITALIZE_KEEP_UPPER:     [...CONFIG_RAW.CAPITALIZE_KEEP_UPPER],
         CAPITALIZE_KEEP_LOWER:     [...CONFIG_RAW.CAPITALIZE_KEEP_LOWER],
+        MEASUREMENT_UNITS:         [...CONFIG_RAW.MEASUREMENT_UNITS],
         CLEAN_TITLE_PATTERNS:      [...CONFIG_RAW.CLEAN_TITLE_PATTERNS],
     };
 
@@ -84,6 +87,7 @@
         CFG_REMIX_OPT:      'discogs_helper_cfg_remix_opt',
         CFG_KEEP_UPPER:     'discogs_helper_cfg_keep_upper',
         CFG_KEEP_LOWER:     'discogs_helper_cfg_keep_lower',
+        CFG_MEASUREMENT_UNITS: 'discogs_helper_cfg_measurement_units',
         CFG_CLEAN_TITLE:    'discogs_helper_cfg_clean_title',
         CFG_CAPITALIZE_FIELDS: 'discogs_helper_cfg_capitalize_fields_v1',
         CFG_CAPITALIZE_BTN_FIELDS: 'discogs_helper_cfg_capitalize_btn_fields_v1',
@@ -182,6 +186,9 @@
 
         const keepLower = parseStoredArray(STORAGE_KEYS.CFG_KEEP_LOWER);
         if (keepLower) CONFIG.CAPITALIZE_KEEP_LOWER = keepLower;
+
+        const measurementUnits = parseStoredArray(STORAGE_KEYS.CFG_MEASUREMENT_UNITS);
+        if (measurementUnits) CONFIG.MEASUREMENT_UNITS = measurementUnits;
 
         const cleanTitle = parseStoredArray(STORAGE_KEYS.CFG_CLEAN_TITLE);
         if (cleanTitle) CONFIG.CLEAN_TITLE_PATTERNS = cleanTitle;
@@ -1115,51 +1122,71 @@
         }
     }
 
-    async function extractTrackPositions() {
+    async function extractTrackPositions(mode = 'both', target = 'title') {
         await setInfoProcessing();
         log('Starting track position extraction...', 'info');
 
         let trackRows = await getTrackRowsOrBail();
         if (!trackRows) return;
 
+        const posRe = /^[\[(]?([A-Za-z]{0,2}\d+[A-Za-z]?)[\])]?\.?\s*[-–—.:]*\s+/;
+
+        if (target === 'artist') {
+            const containersToOpen = [];
+            for (const row of trackRows) {
+                const liveInput = row.querySelector('input[data-type="artist-name"], input.credit-artist-name-input');
+                if (liveInput) continue;
+                const savedMain = getSavedCreditsInRow(row, 'main') || [];
+                const hasSavedPosition = savedMain.some(s => posRe.test((s.artist || '').trim()));
+                if (!hasSavedPosition) continue;
+                const container = row.querySelector('td.subform_track_artists');
+                if (container) containersToOpen.push(container);
+            }
+            if (containersToOpen.length > 0) {
+                await openContainersIfSaved(containersToOpen);
+            }
+        }
+
         const changes = [];
         let processed = 0;
 
         trackRows.forEach((row, index) => {
-            const titleInput = row.querySelector('input[data-type="track-title"], input[id*="track-title"]');
+            const sourceInput = target === 'artist'
+                ? row.querySelector('input[data-type="artist-name"], input.credit-artist-name-input')
+                : row.querySelector('input[data-type="track-title"], input[id*="track-title"]');
             const trackPositionInput = row.querySelector('input.track-number-input');
 
-            if (!titleInput || !trackPositionInput) return;
+            if (!sourceInput || (mode === 'both' && !trackPositionInput)) return;
 
-            const title = titleInput.value.trim();
+            const sourceText = sourceInput.value.trim();
 
-            const posRe = /^[\[(]?([A-Za-z]{0,2}\d+[A-Za-z]?)[\])]?\.?\s*[-–—.:]*\s+/;
-            const posMatch = title.match(posRe);
+            const posMatch = sourceText.match(posRe);
             if (!posMatch) return;
 
             const trackPosition = posMatch[1];
             const prefixLen = posMatch[0].length;
-            const newTitle = title.slice(prefixLen).trim();
+            const newSourceText = sourceText.slice(prefixLen).trim();
 
-            if (!newTitle || newTitle === title) return;
+            if (!newSourceText || newSourceText === sourceText) return;
 
-            const oldTrackPosition = trackPositionInput.value.trim();
-            const trimmedTrackPosition = trimLeadingZeros(trackPosition);
+            setReactValue(sourceInput, newSourceText);
 
-            setReactValue(trackPositionInput, trimmedTrackPosition);
-            setReactValue(titleInput, newTitle);
+            const change = { titleInput: sourceInput, oldTitle: sourceText, newTitle: newSourceText };
 
-            changes.push({
-                titleInput,
-                oldTitle: title,
-                newTitle,
-                trackPositionInput,
-                oldTrackPosition,
-                newTrackPosition: trimmedTrackPosition
-            });
+            if (mode === 'both' && trackPositionInput) {
+                const oldTrackPosition = trackPositionInput.value.trim();
+                const trimmedTrackPosition = trimLeadingZeros(trackPosition);
+                setReactValue(trackPositionInput, trimmedTrackPosition);
+                change.trackPositionInput = trackPositionInput;
+                change.oldTrackPosition = oldTrackPosition;
+                change.newTrackPosition = trimmedTrackPosition;
+                log(`Track ${index + 1}: Extracted track position "${trimmedTrackPosition}" from ${target}`, 'success');
+            } else {
+                log(`Track ${index + 1}: Removed track position from ${target}`, 'success');
+            }
 
+            changes.push(change);
             processed++;
-            log(`Track ${index + 1}: Extracted track position "${trimmedTrackPosition}"`, 'success');
         });
 
         if (changes.length > 0) {
@@ -1169,15 +1196,16 @@
         await clearInfoProcessing();
         if (processed > 0) {
             const plural = processed > 1 ? 's' : '';
-            setInfoSingleLine(`Done! Extracted ${processed} track position${plural}`, true);
-            log(`Done! Extracted ${processed} track position${plural}`, 'success');
+            const verb = mode === 'removeOnly' ? 'Removed' : 'Extracted';
+            setInfoSingleLine(`Done! ${verb} ${processed} track position${plural}`, true);
+            log(`Done! ${verb} ${processed} track position${plural}`, 'success');
         } else {
             setInfoSingleLine('No track positions found', false);
             log('No track positions found', 'info');
         }
     }
 
-    async function scanAndExtract() {
+    async function scanAndExtract(mode = 'both') {
         await setInfoProcessing();
         log('Starting duration scan...', 'info');
 
@@ -1193,7 +1221,7 @@
         trackRows.forEach((row, index) => {
             const titleInput = row.querySelector('input[data-type="track-title"], input[id*="track-title"]');
             const durationInput = row.querySelector('td.subform_track_duration input, input[aria-label*="duration" i]');
-            if (!titleInput || !durationInput) return;
+            if (!titleInput || (mode === 'both' && !durationInput)) return;
             const title = titleInput.value.trim();
 
             let match = title.match(trailingPattern);
@@ -1212,20 +1240,23 @@
             }
 
             if (duration) {
-                const trimmedDuration = trimLeadingZeros(duration);
-
-                changes.push({
-                    titleInput,
-                    oldTitle: title,
-                    newTitle,
-                    durationInput,
-                    oldDuration: durationInput.value.trim(),
-                    newDuration: trimmedDuration
-                });
                 setReactValue(titleInput, newTitle);
-                setReactValue(durationInput, trimmedDuration);
+
+                const change = { titleInput, oldTitle: title, newTitle };
+
+                if (mode === 'both' && durationInput) {
+                    const trimmedDuration = trimLeadingZeros(duration);
+                    change.durationInput = durationInput;
+                    change.oldDuration = durationInput.value.trim();
+                    change.newDuration = trimmedDuration;
+                    setReactValue(durationInput, trimmedDuration);
+                    log(`Track ${index + 1}: Extracted duration "${trimmedDuration}" and updated title to "${newTitle}"`, 'success');
+                } else {
+                    log(`Track ${index + 1}: Removed duration from title, updated title to "${newTitle}"`, 'success');
+                }
+
+                changes.push(change);
                 processed++;
-                log(`Track ${index + 1}: Extracted duration "${trimmedDuration}" and updated title to "${newTitle}"`, 'success');
             }
         });
 
@@ -1236,8 +1267,9 @@
         await clearInfoProcessing();
         if (processed > 0) {
             const plural = processed > 1 ? 's' : '';
-            setInfoSingleLine(`Done! Extracted ${processed} duration${plural}`, true);
-            log(`Done! Extracted ${processed} duration${plural}`, 'success');
+            const verb = mode === 'removeOnly' ? 'Removed' : 'Extracted';
+            setInfoSingleLine(`Done! ${verb} ${processed} duration${plural}`, true);
+            log(`Done! ${verb} ${processed} duration${plural}`, 'success');
         } else {
             setInfoSingleLine('No durations found', false);
             log('No durations found', 'info');
@@ -1716,14 +1748,27 @@
         const displayByPatterns = CONFIG_RAW.REMIX_BY_PATTERNS.map(patternToDisplay).map(p => p.replace(/\s+by\s*$/i, ''));
 
         let remixPatterns =
-            `Remix patterns: ${displayPatterns.join(', ')}\nRemix by patterns: ${displayByPatterns.join(', ')}`;
+            `Extract remix artists from track titles and add them as remix credits\nRemix patterns: ${displayPatterns.join(', ')}\nRemix by patterns: ${displayByPatterns.join(', ')}`;
 
         if (state.remixOptionalEnabled) {
             const displayOptional = CONFIG_RAW.REMIX_PATTERNS_OPTIONAL.map(patternToDisplay);
             if (displayOptional.length) remixPatterns += `\nOptional patterns: ${displayOptional.join(', ')}`;
         }
 
-        remixBtn.title = wrapTitle(remixPatterns);
+        remixBtn.title = wrapTitle(remixPatterns, 70);
+    }
+
+    function updateRemixModeMenuTooltips() {
+        const defaultBtn = document.getElementById('extract-remixers-default');
+        const artistOnlyBtn = document.getElementById('extract-remixers-artist-only');
+        if (defaultBtn) {
+            const displayPatterns   = CONFIG_RAW.REMIX_PATTERNS.map(patternToDisplay);
+            const displayByPatterns = CONFIG_RAW.REMIX_BY_PATTERNS.map(patternToDisplay).map(p => p.replace(/\s+by\s*$/i, ''));
+            defaultBtn.title = wrapTitle(`Extract remixers using the standard remix patterns\nRemix patterns: ${displayPatterns.join(', ')}\nRemix by patterns: ${displayByPatterns.join(', ')}`, 70);
+        }
+        if (artistOnlyBtn) {
+            artistOnlyBtn.title = wrapTitle(`Extract all text inside parentheses for titles without remix keywords\nSkips remix or feat patterns entirely to avoid overlapping`);
+        }
     }
 
     function hasSplitterToken(str) {
@@ -1742,11 +1787,13 @@
         return words.pop();
     }
 
-    function capitalizeWord(core, isFirst) {
+    const ROMAN_NUMERAL_RE = /^M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$/i;
+
+    function capitalizeWord(core, isFirst, precededByNumber) {
         if (!core) return core;
         const quoteLeadM = core.match(/^([\u0027\u2018\u2019\u201B\u02BB\u02BC\u00B4`]+)([\s\S]*)$/u);
         if (quoteLeadM) {
-            return quoteLeadM[1] + capitalizeWord(quoteLeadM[2], isFirst);
+            return quoteLeadM[1] + capitalizeWord(quoteLeadM[2], isFirst, precededByNumber);
         }
         const lc = core.toLowerCase();
         if (core.indexOf('.') !== -1) {
@@ -1762,7 +1809,13 @@
         if (CONFIG.CAPITALIZE_KEEP_UPPER.some(w => w.toLowerCase() === lc)) {
             return core.toUpperCase();
         }
+        if (!CONFIG.MEASUREMENT_UNITS.some(w => w.toLowerCase() === lc) && lc !== 'mix' && ROMAN_NUMERAL_RE.test(core)) {
+            return core.toUpperCase();
+        }
         if (!isFirst && CONFIG.CAPITALIZE_KEEP_LOWER.some(w => w.toLowerCase() === lc)) {
+            return lc;
+        }
+        if (precededByNumber && CONFIG.MEASUREMENT_UNITS.some(w => w.toLowerCase() === lc)) {
             return lc;
         }
         const numPrefixM = core.match(/^(\d+)([\p{L}])(.*)/u);
@@ -1771,6 +1824,9 @@
             if (ampmM) return ampmM[1] + ampmM[2].toUpperCase();
             const ordinalM = core.match(/^(\d+)(st|nd|rd|th)$/i);
             if (ordinalM) return ordinalM[1] + ordinalM[2].toLowerCase();
+            const unitSuffix = core.slice(numPrefixM[1].length);
+            const unitMatch = CONFIG.MEASUREMENT_UNITS.find(u => u.toLowerCase() === unitSuffix.toLowerCase());
+            if (unitMatch) return numPrefixM[1] + unitMatch.toLowerCase();
             return numPrefixM[1] + numPrefixM[2].toUpperCase() + numPrefixM[3].toLowerCase();
         }
         if (state.capitalizeMixedCase && /\p{Lu}/u.test(core.slice(1)) && /\p{Ll}/u.test(core)) {
@@ -1779,7 +1835,7 @@
         return core.charAt(0).toUpperCase() + core.slice(1).toLowerCase();
     }
 
-    function capitalizeSegmentSegmentwise(token, isFirst) {
+    function capitalizeSegmentSegmentwise(token, isFirst, precededByNumber) {
         if (!token) return token;
         if (/^[\p{L}]{1,3}(\.[\p{L}]{1,3})+\.?$/u.test(token)) {
             if (/[a-z]/.test(token) && !CONFIG.CAPITALIZE_KEEP_UPPER.includes(token.toUpperCase())) {
@@ -1797,9 +1853,46 @@
             const treatAsFirst = !firstMatchDone || /&/.test(lastNonWordChar);
             lastNonWordChar = '';
             if (!firstMatchDone) firstMatchDone = true;
-            if (treatAsFirst) return capitalizeWord(word, isFirst);
+            if (treatAsFirst) return capitalizeWord(word, isFirst, precededByNumber);
             return word.toLowerCase();
         });
+    }
+
+    function tryNormalizeCompoundUnits(core, isFirst, precededByNumber) {
+        if (!/[-\/\\;=+#~|_@]/.test(core)) return null;
+        let result = '';
+        let pos = 0;
+        let anyUnitMatched = false;
+        let isFirstChunk = true;
+        while (pos < core.length) {
+            const remaining = core.slice(pos);
+            const unitM = remaining.match(/^(\d*(?:\.\d+)?)([\p{L}]+(?:\/[\p{L}]+)*)/u);
+            if (unitM && unitM[0] && (unitM[1] || (isFirstChunk && precededByNumber))) {
+                const afterLen = unitM[0].length;
+                const boundary = remaining.slice(afterLen);
+                const validBoundary = boundary === '' || !/^[\p{L}\p{N}]/u.test(boundary);
+                const unitMatch = validBoundary ? CONFIG.MEASUREMENT_UNITS.find(u => u.toLowerCase() === unitM[2].toLowerCase()) : null;
+                if (unitMatch) {
+                    result += unitM[1] + unitMatch.toLowerCase();
+                    pos += afterLen;
+                    anyUnitMatched = true;
+                    isFirstChunk = false;
+                    continue;
+                }
+            }
+            const nextSpecialM = remaining.match(/[-\/\\;=+#~|_@]/);
+            const segLen = nextSpecialM ? nextSpecialM.index : remaining.length;
+            if (segLen > 0) {
+                const seg = remaining.slice(0, segLen);
+                result += capitalizeSegmentSegmentwise(seg, isFirstChunk ? isFirst : true, false);
+                pos += segLen;
+                isFirstChunk = false;
+            } else {
+                result += remaining[0];
+                pos += 1;
+            }
+        }
+        return anyUnitMatched ? result : null;
     }
 
     function getFieldLabel(el, preTrackRows, preAlbumArtistEls) {
@@ -1876,7 +1969,7 @@
             } else {
                 const tokens = txt.split(/(\s+)/u).filter(Boolean);
                 if (tokens.length === 0) return txt;
-                const outTokens = tokens.map((tok) => {
+                const outTokens = tokens.map((tok, idx) => {
                     if (!/\p{L}/u.test(tok)) return tok;
                     const internalChars = "\u0027\u2018\u2019\u201B\u02BB\u02BC\u00B4`";
                     const leadMatch = tok.match(new RegExp(`^([^\\p{L}\\p{N}${internalChars}]*)(.*)$`, 'u'));
@@ -1887,13 +1980,17 @@
                     const trail = (trailMatch ? trailMatch[2] : '') || '';
                     const isFirst = !firstWordDone;
                     firstWordDone = true;
+                    const precededByNumber = idx >= 2 && /^\s+$/.test(tokens[idx - 1]) && /^\d+(\.\d+)?$/.test(tokens[idx - 2]);
+                    const compoundUnitResult = tryNormalizeCompoundUnits(core, isFirst, precededByNumber);
                     let transformed;
-                    if (/[-\/\\;=+#~|_@]/.test(core)) {
-                        transformed = core.split(/([-\/\\;=+#~|_@])/).map((seg, idx) =>
-                            /[-\/\\;=+#~|_@]/.test(seg) ? seg : seg ? capitalizeSegmentSegmentwise(seg, idx === 0 ? isFirst : true) : ''
+                    if (compoundUnitResult !== null) {
+                        transformed = compoundUnitResult;
+                    } else if (/[-\/\\;=+#~|_@]/.test(core)) {
+                        transformed = core.split(/([-\/\\;=+#~|_@])/).map((seg, idx2) =>
+                            /[-\/\\;=+#~|_@]/.test(seg) ? seg : seg ? capitalizeSegmentSegmentwise(seg, idx2 === 0 ? isFirst : true, idx2 === 0 ? precededByNumber : false) : ''
                         ).join('');
                     } else {
-                        transformed = capitalizeSegmentSegmentwise(core, isFirst);
+                        transformed = capitalizeSegmentSegmentwise(core, isFirst, precededByNumber);
                     }
                     return lead + transformed + trail;
                 });
@@ -2851,6 +2948,121 @@
         }
     }
 
+    async function extractRemixersArtistOnly(silent = false) {
+        await setInfoProcessing();
+        if (!silent) log('Starting remixer extraction (Artist Only)...', 'info');
+
+        const activeTokens = CONFIG.REMIX_PATTERNS.concat(CONFIG.REMIX_PATTERNS_OPTIONAL);
+        const remixPatternWords = activeTokens.map(p => patternToRegex(p)).join('|');
+        const remixByPatternWordsForRegex = CONFIG.REMIX_BY_PATTERNS.map(p => patternToRegex(p)).join('|');
+        const remixAnyPattern = [remixPatternWords, remixByPatternWordsForRegex].filter(Boolean).join('|');
+        const remixAnyRegex = remixAnyPattern ? new RegExp(`\\b(?:${remixAnyPattern})\\b`, 'i') : null;
+        const featTokens = CONFIG.FEATURING_PATTERNS.map(escapeRegExp).join('|');
+        const featRegex = featTokens ? new RegExp(`(?:${featTokens})`, 'i') : null;
+
+        let trackRows = getTrackInputRows();
+
+        function normalizeForCompare(name) {
+            if (!name) return '';
+            return String(name)
+                .replace(/\s*\(\d+\)\s*$/g, '')
+                .replace(/^[\(\[]+|[\)\]]+$/g, '')
+                .trim()
+                .toLowerCase();
+        }
+
+        const remixersByTrack = [];
+        let foundButAlreadyEntered = 0;
+
+        for (let i = 0; i < trackRows.length; i++) {
+            const row = trackRows[i];
+            const titleInput = row.querySelector('input[data-type="track-title"], input[id*="track-title"]');
+            if (!titleInput) continue;
+            const title = (titleInput.value || '').trim();
+            if (!title) continue;
+
+            const containerRegex = /([\(\[\uFF08\uFF3B]\s*(.*?)\s*[\)\]\uFF09\uFF3D])/g;
+            let m;
+            const remixersForThisTrack = [];
+
+            const savedExtras = getSavedCreditsInRow(row, 'extra') || [];
+            const savedRemixArtists = savedExtras
+                .filter(credit => credit.role && credit.role.toLowerCase().includes('remix'))
+                .map(c => normalizeForCompare(c.artist));
+            const openRemixArtists = getOpenCreditsInRow(row)
+                .filter(c => c.role.toLowerCase().includes('remix'))
+                .map(c => normalizeForCompare(c.artist));
+            const alreadyPresent = new Set([...savedRemixArtists, ...openRemixArtists]);
+
+            while ((m = containerRegex.exec(title)) !== null) {
+                const inner = (m[2] || '').trim();
+                if (!inner) continue;
+                if (/^\s*original(?:\s+(?:mix|version|dub|edit|instrumental|vocal|radio\s+edit|club\s+mix|extended\s+mix))?\s*$/i.test(inner)) continue;
+                if (remixAnyRegex && remixAnyRegex.test(inner)) continue;
+                if (featRegex && featRegex.test(inner)) continue;
+
+                const parts = splitArtistsByConfiguredPatterns(inner);
+                parts.forEach(r => {
+                    const n = normalizeForCompare(r);
+                    if (!alreadyPresent.has(n)) { remixersForThisTrack.push(r); alreadyPresent.add(n); }
+                    else if (!remixersForThisTrack.includes(r)) foundButAlreadyEntered++;
+                });
+            }
+
+            if (remixersForThisTrack.length > 0) {
+                remixersByTrack.push({ row, titleInput, remixers: remixersForThisTrack, trackIndex: i });
+            }
+        }
+
+        const changes = [];
+        let processed = 0;
+        for (const td of remixersByTrack) {
+            const { row, titleInput, remixers, trackIndex } = td;
+            const inputs = await createCreditItems(row, remixers.length);
+            for (let k = 0; k < remixers.length && k < inputs.length; k++) {
+                const part = remixers[k];
+                const { artistInput, roleInput, newCreditItem, removeButton } = inputs[k];
+
+                if (roleInput) setReactValue(roleInput, 'Remix');
+                if (artistInput) setReactValue(artistInput, part);
+                changes.push({
+                    titleInput,
+                    oldTitle: titleInput.value,
+                    newTitle: titleInput.value,
+                    roleInput,
+                    artistInput,
+                    role: 'Remix',
+                    artist: part,
+                    creditItem: newCreditItem,
+                    removeButton
+                });
+                processed++;
+                log(`Track ${trackIndex + 1}: Extracted remixer "${part}" (Remix, Artist Only)`, 'success');
+            }
+        }
+
+        if (changes.length > 0) addActionToHistory({ type: 'remixers', changes });
+
+        await clearInfoProcessing();
+        if (processed > 0) {
+            const plural = processed > 1 ? 's' : '';
+            if (!silent) {
+                setInfoSingleLine(`Done! Extracted ${processed} remixer${plural}`, true);
+                log(`Done! Extracted ${processed} remixer${plural}`, 'success');
+            }
+        } else if (foundButAlreadyEntered > 0) {
+            if (!silent) {
+                setInfoSingleLine('Remixers already entered', false);
+                log('Remixers already entered', 'info');
+            }
+        } else {
+            if (!silent) {
+                setInfoSingleLine('No remixers found', false);
+                log('No remixers found', 'info');
+            }
+        }
+    }
+
     async function tryClickAndWait(removeEl, targetNode, attempts = CONFIG.RETRY_ATTEMPTS, delayMs = CONFIG.RETRY_DELAY_MS) {
         if (!removeEl) return false;
         for (let i = 0; i < attempts; i++) {
@@ -3531,6 +3743,12 @@
                 getValue: () => CONFIG.CAPITALIZE_KEEP_LOWER.join('; '),
             },
             {
+                id: 'cfg-measurement-units',
+                label: 'Measurement Units',
+                desc: 'Unit abbreviations normalized after numbers, with or without spaces',
+                getValue: () => CONFIG.MEASUREMENT_UNITS.join('; '),
+            },
+            {
                 id: 'cfg-clean-title',
                 label: 'Clean Titles',
                 desc: 'Redundant bracket contents to strip from titles',
@@ -3720,6 +3938,7 @@
             const remixOpt       = parseField('cfg-remix-opt');
             const keepUpper      = parseField('cfg-keep-upper');
             const keepLower      = parseField('cfg-keep-lower');
+            const measurementUnits = parseField('cfg-measurement-units');
             const cleanTitle     = parseField('cfg-clean-title');
 
             if (splitter.length)    { CONFIG.ARTIST_SPLITTER_PATTERNS = splitter;        saveArrayToStorage(STORAGE_KEYS.CFG_SPLITTER,   splitter); }
@@ -3730,16 +3949,18 @@
             if (remixOpt.length)    { CONFIG_RAW.REMIX_PATTERNS_OPTIONAL = remixOpt;     saveArrayToStorage(STORAGE_KEYS.CFG_REMIX_OPT,  remixOpt); }
             if (keepUpper.length)   { CONFIG.CAPITALIZE_KEEP_UPPER = keepUpper;          saveArrayToStorage(STORAGE_KEYS.CFG_KEEP_UPPER, keepUpper); }
             if (keepLower.length)   { CONFIG.CAPITALIZE_KEEP_LOWER = keepLower;          saveArrayToStorage(STORAGE_KEYS.CAPITALIZE_KEEP_LOWER, keepLower); }
+            if (measurementUnits.length) { CONFIG.MEASUREMENT_UNITS = measurementUnits;  saveArrayToStorage(STORAGE_KEYS.CFG_MEASUREMENT_UNITS, measurementUnits); }
             if (cleanTitle.length)  { CONFIG.CLEAN_TITLE_PATTERNS = cleanTitle;          saveArrayToStorage(STORAGE_KEYS.CFG_CLEAN_TITLE, cleanTitle); }
 
             applyPatternExpansions();
             updateRemixToggleUI();
             updateRemixButtonTitle();
+            updateRemixModeMenuTooltips();
             const featBtn = document.getElementById('extract-featuring');
-            if (featBtn) featBtn.title = wrapTitle(`Feat Separators: ${CONFIG.FEATURING_PATTERNS.join(', ')}`);
+            if (featBtn) featBtn.title = wrapTitle(`Extract feat artists from track titles and add them as feat credits\nFeat Separators: ${CONFIG.FEATURING_PATTERNS.join(', ')}`);
             const artistsBtn = document.getElementById('extract-artists');
             if (artistsBtn) {
-                artistsBtn.title = wrapTitle('Separator patterns: ' + CONFIG.ARTIST_SPLITTER_PATTERNS.join(', ') + '\nIncl. feat separators: ' + CONFIG.FEATURING_PATTERNS.join(', '));
+                artistsBtn.title = wrapTitle('Extract artists from track titles and add them as track artists\nSeparator patterns: ' + CONFIG.ARTIST_SPLITTER_PATTERNS.join(', ') + '\nIncl. feat separators: ' + CONFIG.FEATURING_PATTERNS.join(', '), 70);
             }
             const cleanBtn = document.getElementById('clean-titles');
             if (cleanBtn) {
@@ -3768,6 +3989,7 @@
             CONFIG.FEATURING_PATTERNS        = [...CONFIG_DEFAULTS.FEATURING_PATTERNS];
             CONFIG.CAPITALIZE_KEEP_UPPER    = [...CONFIG_DEFAULTS.CAPITALIZE_KEEP_UPPER];
             CONFIG.CAPITALIZE_KEEP_LOWER    = [...CONFIG_DEFAULTS.CAPITALIZE_KEEP_LOWER];
+            CONFIG.MEASUREMENT_UNITS        = [...CONFIG_DEFAULTS.MEASUREMENT_UNITS];
             CONFIG.CLEAN_TITLE_PATTERNS     = [...CONFIG_DEFAULTS.CLEAN_TITLE_PATTERNS];
             CONFIG.INACTIVITY_TIMEOUT_MS    = CONFIG_DEFAULTS.INACTIVITY_TIMEOUT_MS;
             state.startCollapsed            = false;
@@ -3787,7 +4009,7 @@
             const keys = [
                 STORAGE_KEYS.CFG_FEATURING, STORAGE_KEYS.CFG_REMIX, STORAGE_KEYS.CFG_REMIX_BY,
                 STORAGE_KEYS.CFG_REMIX_OPT, STORAGE_KEYS.CFG_SPLITTER, STORAGE_KEYS.CFG_CREDIT_SEP, STORAGE_KEYS.CFG_KEEP_UPPER,
-                STORAGE_KEYS.CFG_KEEP_LOWER, STORAGE_KEYS.CFG_CLEAN_TITLE,
+                STORAGE_KEYS.CFG_KEEP_LOWER, STORAGE_KEYS.CFG_MEASUREMENT_UNITS, STORAGE_KEYS.CFG_CLEAN_TITLE,
                 STORAGE_KEYS.CFG_TIMEOUT, STORAGE_KEYS.CFG_START_COLLAPSED, STORAGE_KEYS.CFG_CAPITALIZE_FIELDS, STORAGE_KEYS.CFG_CAPITALIZE_BTN_FIELDS, STORAGE_KEYS.CFG_SPLIT_IMPORT, STORAGE_KEYS.CFG_IMPORT_CREDITS, STORAGE_KEYS.CFG_IMPORT_STYLES, STORAGE_KEYS.CFG_IMPORT_AUTO_REMIXERS, STORAGE_KEYS.CFG_IMPORT_AUTO_FEAT, STORAGE_KEYS.CFG_CAPITALIZE_MIXED, STORAGE_KEYS.CFG_IMPORT_AUTO_DESCR, STORAGE_KEYS.CFG_IMPORT_COUNTRY
             ];
             keys.forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
@@ -3816,6 +4038,7 @@
 
             updateRemixToggleUI();
             updateRemixButtonTitle();
+            updateRemixModeMenuTooltips();
             log('Config reset to defaults', 'success');
             setInfoSingleLine('Defaults restored!', true);
         }
@@ -5900,6 +6123,7 @@
     }
     function parseCreditLines(lines) {
         const results = [];
+        const FALSE_CREDIT_NAME_RE = /^(?:credited\s+remixers?|various\s+remixers?|the\s+remixers?|(?:except\s+)?where\s+(?:otherwise\s+)?noted|as\s+(?:otherwise\s+)?noted|unless\s+(?:otherwise\s+)?noted|thanx?(?:\s+to)?|special\s+thanks(?:\s+to)?|thanks?(?:\s+to)?|n\/a|none|unknown)$/i;
         lines = lines.flatMap(l => {
             if (!/\.\s+[A-Z\[]/.test(l)) return [l];
             const segs = l.split(/\.\s+(?=[A-Z\[])/);
@@ -6286,7 +6510,7 @@
                 const r = parseRoles(cleanRole).filter(role =>
                     !(role.official === 'Remix' && !role.bracket)
                 );
-                const n = parseNames(cleanName(cleanedNameStr));
+                const n = parseNames(cleanName(cleanedNameStr)).filter(name => !FALSE_CREDIT_NAME_RE.test(name.trim()));
                 if (r.length > 0 && n.length > 0) {
                     for (const name of n) {
                         const parenM = name.replace(/[\u200b\u200c\u200d\u200e\u200f\u00ad\ufeff\u2060\u180e]/g, '').trim().match(/^(.+?)\s*\(([^()]+)\)\s*$/);
@@ -6334,7 +6558,7 @@
                 const artistParenRolesM = line.match(/^([^()\[\]]{1,60}?)\s*\(([^()]+)\)\s*$/);
                 if (artistParenRolesM && !normalizeCreditRole(artistParenRolesM[1].trim())) {
                     const r = parseRoles(artistParenRolesM[2].trim());
-                    const n = parseNames(cleanName(artistParenRolesM[1].trim()));
+                    const n = parseNames(cleanName(artistParenRolesM[1].trim())).filter(name => !FALSE_CREDIT_NAME_RE.test(name.trim()));
                     if (r.length > 0 && n.length > 0) {
                         for (const name of n) results.push({ name: name.trim(), roles: r.map(toRoleStr) });
                         continue;
@@ -6348,7 +6572,7 @@
                     } else {
                         const rolesSecond = parseRoles(colonMatch[2]);
                         if (rolesSecond.length) {
-                            const names = parseNames(cleanName(colonMatch[1]));
+                            const names = parseNames(cleanName(colonMatch[1])).filter(name => !FALSE_CREDIT_NAME_RE.test(name.trim()));
                             for (const name of names) results.push({ name: name.trim(), roles: rolesSecond.map(toRoleStr) });
                         }
                     }
@@ -6360,7 +6584,7 @@
                             const { clean: cleanRole, positions } = extractTrackPos(roleStr);
                             const roles = parseRoles(cleanRole);
                             if (roles.length) {
-                                const n = parseNames(cleanName(nameSide));
+                                const n = parseNames(cleanName(nameSide)).filter(name => !FALSE_CREDIT_NAME_RE.test(name.trim()));
                                 if (n.length > 0) {
                                     for (const name of n) results.push({ name: name.trim(), roles: roles.map(toRoleStr), trackPositions: positions });
                                     break;
@@ -6393,7 +6617,7 @@
                             const startsLowercase = /^\p{Ll}/u.test(firstNameWord);
                             if (!isSentenceFiller && !startsLowercase) {
                                 const namePart = cleanName(rawNamePart);
-                                const n = parseNames(namePart);
+                                const n = parseNames(namePart).filter(name => !FALSE_CREDIT_NAME_RE.test(name.trim()));
                                 if (n.length > 0) {
                                     const { positions } = extractTrackPos(words.slice(0, bestNameStart).join(' '));
                                     for (const name of n) results.push({ name: name.trim(), roles: bestRoles.map(toRoleStr), trackPositions: positions });
@@ -6409,11 +6633,31 @@
 
     const BANDCAMP_CATNO_RE = /\bcatalog(?:ue)?\.?\s*(?:number|no\.?|#)?\s*[:\-]?\s*#?\s*([A-Z][A-Z0-9]{0,9}(?:[\s\-][A-Z0-9]{1,10}){0,3})\b|\bcat\.?\s*(?:(?:no\.?|nr\.?|number)\s*[:\-]?\s*#?\s*([A-Z][A-Z0-9]{0,9}(?:[\s\-][A-Z0-9]{1,10}){0,3})|#\s*[:\-]?\s*([A-Z][A-Z0-9]{0,9}(?:[\s\-][A-Z0-9]{1,10}){0,3})|:\s*#?\s*([A-Z][A-Z0-9]{0,9}(?:[\s\-][A-Z0-9]{1,10}){0,3}))\b/i;
 
-    function parseBandcampCatno(doc) {
+    const TITLE_CATNO_RE = /[\[(]([A-Za-z0-9]+(?:[\s\-][A-Za-z0-9]+){0,2})[\])]/g;
+
+    function parseTitleCatno(title) {
+        if (!title) return null;
+        TITLE_CATNO_RE.lastIndex = 0;
+        let m;
+        while ((m = TITLE_CATNO_RE.exec(title)) !== null) {
+            const candidate = m[1].trim();
+            if (/[A-Za-z]/.test(candidate) && /[0-9]/.test(candidate)) {
+                return candidate.replace(/\s+/g, ' ');
+            }
+        }
+        return null;
+    }
+
+    function parseBandcampCatno(doc, title) {
         const creditsEl = doc.querySelector('div.tralbumData.tralbum-credits');
         if (creditsEl) {
             const m = (creditsEl.textContent || '').match(BANDCAMP_CATNO_RE);
             if (m) return { catno: (m[1] || m[2] || m[3] || m[4]).trim(), source: 'credits' };
+        }
+
+        if (title) {
+            const catno = parseTitleCatno(title);
+            if (catno) return { catno, source: 'title' };
         }
 
         const aboutEl = doc.querySelector('div.tralbumData.tralbum-about');
@@ -6544,14 +6788,25 @@
 
         const creditsEl = doc.querySelector('div.tralbumData.tralbum-credits');
         if (creditsEl) {
-            const results = parseCreditLines(joinContinuations(expandInlineTrackLists(toLines(creditsEl))));
+            const METADATA_LABEL_RE = /^(?:label|catalog(?:ue)?(?:\s*(?:number|no\.?|#))?|cat\.?\s*(?:no\.?|nr\.?|number|#)?|format|released?(?:\s+date)?|release\s+date|country|genre|styles?|barcode|matrix|runout|spars\s*code|price|packaging|edition)\s*:/i;
+            const TRACKLIST_ENTRY_RE = /^\d{1,3}[.)]\s+\S/;
+            const creditsLines = joinContinuations(expandInlineTrackLists(toLines(creditsEl))).filter(l => {
+                if (METADATA_LABEL_RE.test(l.trim())) return false;
+                if (TRACKLIST_ENTRY_RE.test(l.trim())) return false;
+                return true;
+            });
+            const results = parseCreditLines(creditsLines);
             if (results.length) return { credits: results, source: 'credits' };
         }
 
         const aboutEl = doc.querySelector('div.tralbumData.tralbum-about');
         if (aboutEl) {
             const aboutLines = joinContinuations(expandInlineTrackLists(toLines(aboutEl)));
+            const METADATA_LABEL_RE = /^(?:label|catalog(?:ue)?(?:\s*(?:number|no\.?|#))?|cat\.?\s*(?:no\.?|nr\.?|number|#)?|format|released?(?:\s+date)?|release\s+date|country|genre|styles?|barcode|matrix|runout|spars\s*code|price|packaging|edition)\s*:/i;
+            const TRACKLIST_ENTRY_RE = /^\d{1,3}[.)]\s+\S/;
             const creditLike = aboutLines.filter(l => {
+                if (METADATA_LABEL_RE.test(l.trim())) return false;
+                if (TRACKLIST_ENTRY_RE.test(l.trim())) return false;
                 const hasCreditSignal = /\bby\s*:/i.test(l) || /^\[/.test(l.trim())
                     || /\]\s*by\b/i.test(l) || /\bexcept\b.*\bby\b/i.test(l)
                     || /^[^,\-]{1,40}\s*[-\u2013\u2014]\s*\w/.test(l.trim());
@@ -6807,7 +7062,7 @@
 
         const { credits, source: creditsSource } = parseBandcampCredits(doc);
         const creditsSourceInfo = creditsSource;
-        const { catno: parsedCatno, source: catnoSource } = parseBandcampCatno(doc);
+        const { catno: parsedCatno, source: catnoSource } = parseBandcampCatno(doc, title);
 
         return {
             artist, title, label,
@@ -10383,11 +10638,13 @@ wiIsAntiBotPage(html)) {
         let manuallyDisabledCredits = new Set();
         let disabledGenres = new Set();
         let disabledStyles = new Set();
+        let catnoDisabled = false;
         function getFilteredFetchedData() {
             const needsCreditFilter = (disabledCreditIndices.size > 0 || disabledCreditRoles.size > 0) && fetchedData?.credits?.length;
             const needsGenreStyleFilter = (disabledGenres.size > 0 || disabledStyles.size > 0) && fetchedData?.genreStyleGroups?.length;
             const needsDateSwap = selectedDateField === 'publishDate' && fetchedData?.publishDate;
-            if (!needsCreditFilter && !needsGenreStyleFilter && !needsDateSwap) return fetchedData;
+            const needsCatnoFilter = catnoDisabled && fetchedData?.catno;
+            if (!needsCreditFilter && !needsGenreStyleFilter && !needsDateSwap && !needsCatnoFilter) return fetchedData;
 
             const result = { ...fetchedData };
             if (needsDateSwap) {
@@ -10429,6 +10686,7 @@ wiIsAntiBotPage(html)) {
                 result.finalGenres = finalGenres;
                 result.finalStyles = finalStyles;
             }
+            if (needsCatnoFilter) result.catno = null;
             return result;
         }
         const urlInput    = overlay.querySelector('#dh-wi-url');
@@ -10739,6 +10997,7 @@ wiIsAntiBotPage(html)) {
             manuallyDisabledCredits = new Set();
             disabledGenres = new Set();
             disabledStyles = new Set();
+            catnoDisabled = false;
             selectedDateField = 'date';
             applyBtn.disabled = true; applyWrap.style.opacity = '0.45'; applyWrap.style.pointerEvents = 'none'; savedraftWrap.style.opacity = '0.45'; savedraftWrap.style.pointerEvents = 'none';
             try {
@@ -10789,7 +11048,7 @@ wiIsAntiBotPage(html)) {
                     const chips = rolesArr.map(r => {
                         const isRoleDisabled = disabledCreditRoles.has(`${idx}::${r}`);
                         return `
-                            <span class="dh-wi-cred-chip" data-idx="${idx}" data-role="${esc(r)}" style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;color:#fff;padding:2px 7px;border-radius:4px;cursor:pointer;background:${isRoleDisabled ? '#ccc' : 'rgba(26,111,191,0.55)'};${isRoleDisabled ? 'opacity:0.6;' : ''}">
+                            <span class="dh-wi-cred-chip" data-idx="${idx}" data-role="${esc(r)}" style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;color:#fff;padding:2px 7px;border-radius:4px;cursor:pointer;background:${isRoleDisabled ? '#ccc' : '#345ca8'};${isRoleDisabled ? 'opacity:0.6;' : ''}">
                                 <span style="${isRoleDisabled ? 'text-decoration:line-through;' : ''}">${esc(r)}</span>
                                 <span class="dh-wi-cred-chip-toggle" data-idx="${idx}" data-role="${esc(r)}" title="Exclude this role from submission" style="${isRoleDisabled ? credChipToggleDisabledStyle : credChipToggleStyle}">✕</span>
                             </span>
@@ -10832,7 +11091,7 @@ wiIsAntiBotPage(html)) {
                     const chips = (g.styles || []).map(s => {
                         const isStyleDisabled = isGenreDisabled || disabledStyles.has(s);
                         return `
-                            <span class="dh-wi-style-chip" data-style="${esc(s)}" style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;color:#fff;padding:2px 7px;border-radius:4px;cursor:pointer;background:${isStyleDisabled ? '#ccc' : 'rgba(26,111,191,0.55)'};${isStyleDisabled ? 'opacity:0.6;' : ''}">
+                            <span class="dh-wi-style-chip" data-style="${esc(s)}" style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;color:#fff;padding:2px 7px;border-radius:4px;cursor:pointer;background:${isStyleDisabled ? '#ccc' : '#345ca8'};${isStyleDisabled ? 'opacity:0.6;' : ''}">
                                 <span style="${isStyleDisabled ? 'text-decoration:line-through;' : ''}">${esc(s)}</span>
                                 <span class="dh-wi-style-toggle" data-style="${esc(s)}" title="Exclude this style from submission" style="${isStyleDisabled ? chipToggleDisabledStyle : chipToggleStyle}">✕</span>
                             </span>
@@ -10874,17 +11133,35 @@ wiIsAntiBotPage(html)) {
                         return `${labelText.slice(0, truncLen).trimEnd()}...`;
                     };
                     const wiResolvedCountry = (state.importCountry && fetchedData.country) ? fetchedData.country : 'Worldwide';
-                    const buildMetaLineHtmlEsc = (labelText) => [esc(fitLabelForWiMeta(labelText, fetchedData.catno, wiResolvedCountry)), esc(fetchedData.catno), esc(wiResolvedCountry)].filter(Boolean).join(' · ');
+                    const wiCatnoSourceLabelMap = { credits: 'credits', title: 'release title', notes: 'notes' };
+                    const catnoIsBandcampSourced = !!(fetchedData.catnoSource && wiCatnoSourceLabelMap[fetchedData.catnoSource]);
+                    const wiPreviewIsDark = localStorage.getItem(STORAGE_KEYS.THEME_KEY) === 'dark';
+                    const catnoActiveStyle = wiPreviewIsDark ? 'cursor:pointer;color:#7fb2f5;' : 'cursor:pointer;color:#1d63b3;';
+                    const catnoActiveHoverStyle = wiPreviewIsDark ? 'cursor:pointer;color:#a8cdfa;text-decoration:underline;' : 'cursor:pointer;color:#0f4a8c;text-decoration:underline;';
+                    const catnoDisabledStyle = 'cursor:pointer;color:#888;text-decoration:line-through;opacity:0.65;';
+                    const buildCatnoTooltip = () => `Catalog number was sourced from ${wiCatnoSourceLabelMap[fetchedData.catnoSource]}\nPlease verify if this information is accurate\n${catnoDisabled ? 'Click to re-enable' : 'Click to exclude and set to none'}`;
+                    const wiCatnoTooltip = catnoIsBandcampSourced
+                        ? buildCatnoTooltip()
+                        : '';
+                    const wiCatnoHtml = fetchedData.catno
+                        ? (catnoIsBandcampSourced
+                            ? `<span class="dh-wi-catno-toggle" title="${esc(wiCatnoTooltip).replace(/"/g, '&quot;')}" style="${catnoDisabled ? catnoDisabledStyle : catnoActiveStyle}">${esc(fetchedData.catno)}</span>`
+                            : esc(fetchedData.catno))
+                        : '';
+                    const buildMetaLineHtmlEsc = (labelText) => [esc(fitLabelForWiMeta(labelText, fetchedData.catno, wiResolvedCountry)), wiCatnoHtml, esc(wiResolvedCountry)].filter(Boolean).join(' · ');
                     const metaLineClampStyle = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
                     const line3Base = [`${fetchedData.tracks.length} track${fetchedData.tracks.length !== 1 ? 's' : ''}`, fetchedData.fileType || 'FLAC', (fetchedData.bitdepth && fetchedData.samplerate) ? `${fetchedData.bitdepth}-bit/${fetchedData.samplerate / 1000} kHz` : (fetchedData.freeText || null)].filter(Boolean).map(esc).join(' · ');
                     const line3Html = dateSegmentHtml ? `${line3Base}${line3Base ? ' · ' : ''}${dateSegmentHtml}` : line3Base;
+                    const wiTitleColor = wiPreviewIsDark ? '#f0f2f7' : '#1c2230';
+                    const wiMetaColor = wiPreviewIsDark ? '#c7ccdb' : '#5c6470';
+                    const wiLine3Color = wiPreviewIsDark ? '#8f95a8' : '#828b98';
                     previewEl.innerHTML = `
                         <div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:5px;">
                             ${imgHtml}
                             <div style="min-width:0;flex:1;overflow:hidden;">
-                                <div style="font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(fetchedData.artist)}${fetchedData.artist && fetchedData.title ? ' – ' : ''}${esc(fetchedData.title)}</div>
-                                <div id="dh-wi-meta-line" style="color:#888;font-size:10px;${metaLineClampStyle}">${buildMetaLineHtmlEsc(fetchedData.label)}</div>
-                                <div style="color:#888;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${line3Html}</div>
+                                <div style="font-weight:700;font-size:12.5px;color:${wiTitleColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(fetchedData.artist)}${fetchedData.artist && fetchedData.title ? ' – ' : ''}${esc(fetchedData.title)}</div>
+                                <div id="dh-wi-meta-line" style="color:${wiMetaColor};font-weight:500;font-size:10.5px;${metaLineClampStyle}">${buildMetaLineHtmlEsc(fetchedData.label)}</div>
+                                <div style="color:${wiLine3Color};font-weight:500;font-size:10.25px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${line3Html}</div>
                             </div>
                         </div>
                         <div style="display:flex;gap:2px;margin-bottom:5px;border-bottom:1px solid rgba(0,0,0,0.08);">
@@ -10990,7 +11267,7 @@ wiIsAntiBotPage(html)) {
                                     row.querySelectorAll('.dh-wi-cred-chip').forEach(chip => {
                                         const role = chip.dataset.role;
                                         if (disabledCreditRoles.has(`${idx}::${role}`)) return;
-                                        chip.style.background = 'rgba(26,111,191,0.55)';
+                                        chip.style.background = '#345ca8';
                                         chip.style.opacity = '';
                                         const label = chip.querySelector('span');
                                         if (label) label.style.textDecoration = '';
@@ -11029,12 +11306,12 @@ wiIsAntiBotPage(html)) {
                         chip.addEventListener('mouseenter', () => {
                             if (manuallyDisabledCredits.has(idx) || disabledCreditRoles.has(key)) return;
                             if (labelEl) labelEl.style.textDecoration = 'line-through';
-                            chip.style.background = 'rgba(26,111,191,0.78)';
+                            chip.style.background = '#4f7ef7';
                         });
                         chip.addEventListener('mouseleave', () => {
                             if (manuallyDisabledCredits.has(idx) || disabledCreditRoles.has(key)) return;
                             if (labelEl) labelEl.style.textDecoration = '';
-                            chip.style.background = 'rgba(26,111,191,0.55)';
+                            chip.style.background = '#345ca8';
                         });
                         chip.addEventListener('click', (e) => {
                             e.stopPropagation();
@@ -11043,7 +11320,7 @@ wiIsAntiBotPage(html)) {
                             const toggle = chip.querySelector('.dh-wi-cred-chip-toggle');
                             if (disabledCreditRoles.has(key)) {
                                 disabledCreditRoles.delete(key);
-                                chip.style.background = 'rgba(26,111,191,0.55)';
+                                chip.style.background = '#345ca8';
                                 chip.style.opacity = '';
                                 if (labelEl) labelEl.style.textDecoration = '';
                                 if (toggle) toggle.style.cssText = credChipToggleStyle;
@@ -11086,7 +11363,7 @@ wiIsAntiBotPage(html)) {
                                     stylesRow.querySelectorAll('.dh-wi-style-chip').forEach(chip => {
                                         const style = chip.dataset.style;
                                         if (disabledStyles.has(style)) return;
-                                        chip.style.background = 'rgba(26,111,191,0.55)';
+                                        chip.style.background = '#345ca8';
                                         chip.style.opacity = '';
                                         const label = chip.querySelector('span');
                                         if (label) label.style.textDecoration = '';
@@ -11122,12 +11399,12 @@ wiIsAntiBotPage(html)) {
                         chip.addEventListener('mouseenter', () => {
                             if (isCascadeLocked() || disabledStyles.has(style)) return;
                             if (labelEl) labelEl.style.textDecoration = 'line-through';
-                            chip.style.background = 'rgba(26,111,191,0.78)';
+                            chip.style.background = '#4f7ef7';
                         });
                         chip.addEventListener('mouseleave', () => {
                             if (isCascadeLocked() || disabledStyles.has(style)) return;
                             if (labelEl) labelEl.style.textDecoration = '';
-                            chip.style.background = 'rgba(26,111,191,0.55)';
+                            chip.style.background = '#345ca8';
                         });
                         chip.addEventListener('click', (e) => {
                             e.stopPropagation();
@@ -11136,7 +11413,7 @@ wiIsAntiBotPage(html)) {
                             const toggle = chip.querySelector('.dh-wi-style-toggle');
                             if (disabledStyles.has(style)) {
                                 disabledStyles.delete(style);
-                                chip.style.background = 'rgba(26,111,191,0.55)';
+                                chip.style.background = '#345ca8';
                                 chip.style.opacity = '';
                                 if (labelEl) labelEl.style.textDecoration = '';
                                 if (toggle) toggle.style.cssText = chipToggleStyle;
@@ -11150,6 +11427,23 @@ wiIsAntiBotPage(html)) {
                             updateStylesTabCount();
                         });
                     });
+                    const catnoToggleEl = previewEl.querySelector('.dh-wi-catno-toggle');
+                    if (catnoToggleEl) {
+                        catnoToggleEl.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            catnoDisabled = !catnoDisabled;
+                            catnoToggleEl.style.cssText = catnoDisabled ? catnoDisabledStyle : catnoActiveStyle;
+                            catnoToggleEl.title = buildCatnoTooltip();
+                        });
+                        catnoToggleEl.addEventListener('mouseenter', () => {
+                            if (catnoDisabled) return;
+                            catnoToggleEl.style.cssText = catnoActiveHoverStyle;
+                        });
+                        catnoToggleEl.addEventListener('mouseleave', () => {
+                            if (catnoDisabled) return;
+                            catnoToggleEl.style.cssText = catnoActiveStyle;
+                        });
+                    }
                     previewEl.querySelectorAll('.dh-wi-preview-tab').forEach(btn => {
                         btn.addEventListener('click', () => {
                             previewEl.querySelectorAll('.dh-wi-preview-tab').forEach(b => {
@@ -11342,7 +11636,7 @@ wiIsAntiBotPage(html)) {
                         const chips = rolesArr.map(r => {
                             const isRoleDisabled = disabledDiscogsCreditRoles.has(`${idx}::${r}`);
                             return `
-                                <span class="dh-wi-dcred-chip" data-idx="${idx}" data-role="${esc(r)}" style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;color:#fff;padding:2px 7px;border-radius:4px;cursor:pointer;background:${isRoleDisabled ? '#ccc' : 'rgba(26,111,191,0.55)'};${isRoleDisabled ? 'opacity:0.6;' : ''}">
+                                <span class="dh-wi-dcred-chip" data-idx="${idx}" data-role="${esc(r)}" style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;color:#fff;padding:2px 7px;border-radius:4px;cursor:pointer;background:${isRoleDisabled ? '#ccc' : '#345ca8'};${isRoleDisabled ? 'opacity:0.6;' : ''}">
                                     <span style="${isRoleDisabled ? 'text-decoration:line-through;' : ''}">${esc(r)}</span>
                                     <span class="dh-wi-dcred-chip-toggle" title="Exclude this role from submission" style="${isRoleDisabled ? credChipToggleDisabledStyle : credChipToggleStyle}">✕</span>
                                 </span>
@@ -11429,7 +11723,7 @@ wiIsAntiBotPage(html)) {
                                     row.querySelectorAll('.dh-wi-dcred-chip').forEach(chip => {
                                         const role = chip.dataset.role;
                                         if (disabledDiscogsCreditRoles.has(`${idx}::${role}`)) return;
-                                        chip.style.background = 'rgba(26,111,191,0.55)';
+                                        chip.style.background = '#345ca8';
                                         chip.style.opacity = '';
                                         const label = chip.querySelector('span');
                                         if (label) label.style.textDecoration = '';
@@ -11466,12 +11760,12 @@ wiIsAntiBotPage(html)) {
                         chip.addEventListener('mouseenter', () => {
                             if (manuallyDisabledDiscogsCredits.has(idx) || disabledDiscogsCreditRoles.has(key)) return;
                             if (labelEl) labelEl.style.textDecoration = 'line-through';
-                            chip.style.background = 'rgba(26,111,191,0.78)';
+                            chip.style.background = '#4f7ef7';
                         });
                         chip.addEventListener('mouseleave', () => {
                             if (manuallyDisabledDiscogsCredits.has(idx) || disabledDiscogsCreditRoles.has(key)) return;
                             if (labelEl) labelEl.style.textDecoration = '';
-                            chip.style.background = 'rgba(26,111,191,0.55)';
+                            chip.style.background = '#345ca8';
                         });
                         chip.addEventListener('click', (e) => {
                             e.stopPropagation();
@@ -11479,7 +11773,7 @@ wiIsAntiBotPage(html)) {
                             const toggle = chip.querySelector('.dh-wi-dcred-chip-toggle');
                             if (disabledDiscogsCreditRoles.has(key)) {
                                 disabledDiscogsCreditRoles.delete(key);
-                                chip.style.background = 'rgba(26,111,191,0.55)';
+                                chip.style.background = '#345ca8';
                                 chip.style.opacity = '';
                                 if (labelEl) labelEl.style.textDecoration = '';
                                 if (toggle) toggle.style.cssText = credChipToggleStyle;
@@ -11797,8 +12091,21 @@ wiIsAntiBotPage(html)) {
                 </div>
 
                 <div id="additional-tools-dropdown" style="display:none; flex-wrap:wrap; gap:5px; margin-bottom:5px;">
-                    <button id="extract-track-numbers" class="dh-btn dh-icon-btn" style="flex:1 1 0; min-width:34px; justify-content:center;">🔢</button>
-                    <button id="scan-and-extract"       class="dh-btn dh-icon-btn" style="flex:1 1 0; min-width:34px; justify-content:center;">🕛</button>
+                    <button id="extract-track-numbers" class="dh-btn dh-icon-btn" style="flex:1 1 0; min-width:34px; justify-content:center; position:relative;" title="Extract track positions from titles or track artists">🔢</button>
+                    <div id="extract-track-numbers-menu" style="display:none; position:absolute; z-index:9999; background:#fff; border:1px solid #ccc; border-radius:4px; padding:4px 4px 4px 4px; box-shadow:0 2px 8px rgba(0,0,0,0.35); flex-direction:column; gap:2px; width:max-content; margin-top:2px;">
+                        <div style="font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.02em; color:#888; padding:3px 8px 1px;">Remove and Enter</div>
+                        <button id="extract-track-numbers-both-title"  style="display:block; width:100%; text-align:left; font-size:11px; padding:4px 8px; border:none; border-radius:3px; cursor:pointer; white-space:nowrap; background:transparent; color:#111;" title="Remove position from track title and enter it into the position field">Target: Track Title</button>
+                        <button id="extract-track-numbers-both-artist" style="display:block; width:100%; text-align:left; font-size:11px; padding:4px 8px; border:none; border-radius:3px; cursor:pointer; white-space:nowrap; background:transparent; color:#111;" title="Remove position from track artist and enter it into the position field">Target: Track Artist</button>
+                        <div style="height:1px; background:rgba(0,0,0,0.1); margin:3px 0;"></div>
+                        <div style="font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.02em; color:#888; padding:3px 8px 1px;">Remove Only</div>
+                        <button id="extract-track-numbers-remove-title"  style="display:block; width:100%; text-align:left; font-size:11px; padding:4px 8px; border:none; border-radius:3px; cursor:pointer; white-space:nowrap; background:transparent; color:#111;" title="Remove position from track title only, without changing the position field">Target: Track Title</button>
+                        <button id="extract-track-numbers-remove-artist" style="display:block; width:100%; text-align:left; font-size:11px; padding:4px 8px; border:none; border-radius:3px; cursor:pointer; white-space:nowrap; background:transparent; color:#111;" title="Remove position from track artist only, without changing the position field">Target: Track Artist</button>
+                    </div>
+                    <button id="scan-and-extract"       class="dh-btn dh-icon-btn" style="flex:1 1 0; min-width:34px; justify-content:center; position:relative;" title="Extract durations from titles">🕛</button>
+                    <div id="scan-and-extract-menu" style="display:none; position:absolute; z-index:9999; background:#fff; border:1px solid #ccc; border-radius:4px; padding:4px 4px 4px 4px; box-shadow:0 2px 8px rgba(0,0,0,0.35); flex-direction:column; gap:2px; width:max-content; margin-top:2px;">
+                        <button id="scan-and-extract-both"   style="display:block; width:100%; text-align:left; font-size:11px; padding:4px 8px; border:none; border-radius:3px; cursor:pointer; white-space:nowrap; background:transparent; color:#111;" title="Remove duration from title and enter it into the duration field">Remove And Enter</button>
+                        <button id="scan-and-extract-remove" style="display:block; width:100%; text-align:left; font-size:11px; padding:4px 8px; border:none; border-radius:3px; cursor:pointer; white-space:nowrap; background:transparent; color:#111;" title="Remove duration from title only, without changing the duration field">Remove Only</button>
+                    </div>
                     <button id="strip-whitespace"       class="dh-btn dh-icon-btn" style="flex:1 1 0; min-width:34px; justify-content:center;">⇥⇤</button>
                     <button id="clean-titles" class="dh-btn dh-icon-btn" style="flex:1 1 0; min-width:34px; justify-content:center; position:relative;" title="Clean titles">✂️</button>
                     <div id="clean-titles-menu" style="display:none; position:absolute; z-index:9999; background:#fff; border:1px solid #ccc; border-radius:4px; padding:4px 4px 4px 4px; box-shadow:0 2px 8px rgba(0,0,0,0.35); flex-direction:column; gap:2px; width:max-content; margin-top:2px;">
@@ -11816,7 +12123,11 @@ wiIsAntiBotPage(html)) {
 
                 <button id="extract-artists"   class="dh-btn" style="width:100%;">👤 Extract Artists</button>
                 <button id="extract-featuring" class="dh-btn" style="width:100%;">👥 Extract Feat Artists</button>
-                <button id="extract-remixers"  class="dh-btn" style="width:100%;">🎶 Extract Remixers</button>
+                <button id="extract-remixers"  class="dh-btn" style="width:100%; position:relative;">🎶 Extract Remixers</button>
+                <div id="extract-remixers-menu" style="display:none; position:absolute; z-index:9999; background:#fff; border:1px solid #ccc; border-radius:4px; padding:4px; box-shadow:0 2px 8px rgba(0,0,0,0.35); flex-direction:column; gap:2px; margin-top:2px;">
+                    <button id="extract-remixers-default" style="display:block; width:100%; text-align:left; font-size:11px; padding:4px 8px; border:none; border-radius:3px; cursor:pointer; white-space:normal; line-height:1.3; background:transparent; color:#111;">Pattern Mode e.g., "Title (Artist Remix)"</button>
+                    <button id="extract-remixers-artist-only" style="display:block; width:100%; text-align:left; font-size:11px; padding:4px 8px; border:none; border-radius:3px; cursor:pointer; white-space:normal; line-height:1.3; background:transparent; color:#111;">Non-Pattern Mode e.g., "Title (Artist)"</button>
+                </div>
 
                 <hr class="dh-divider">
 
@@ -11843,7 +12154,7 @@ wiIsAntiBotPage(html)) {
         document.body.appendChild(panel);
         addPanelStyles();
         const featBtnEl = document.getElementById('extract-featuring');
-        if (featBtnEl) featBtnEl.title = wrapTitle(`Feat patterns: ${CONFIG.FEATURING_PATTERNS.join(', ')}`);
+        if (featBtnEl) featBtnEl.title = wrapTitle(`Extract feat artists from track titles and add them as feat credits\nFeat patterns: ${CONFIG.FEATURING_PATTERNS.join(', ')}`);
         const styleButtons = panel.querySelectorAll('.dh-btn');
         styleButtons.forEach(btn => {
             btn.style.background = '#f1f3f5';
@@ -12022,15 +12333,12 @@ wiIsAntiBotPage(html)) {
 
         [
             ['save-all-fields',      'Save / edit all open credit fields',                              saveAllFields],
-            ['scan-and-extract',     'Extract durations from titles',                                   scanAndExtract],
-            ['extract-track-numbers','Extract track positions from titles',                             extractTrackPositions],
             ['strip-whitespace',     'Strip leading/trailing whitespace from all fields',               stripWhitespace],
             ['capitalize-all',       'Capitalize artists, label/company, joiners, titles and credits' + (state.capitalizeMixedCase ? '\n(mixed-case words like DnB, iTunes preserved - toggle in Config)' : ''),                 null],
             ['tracklist-import',     'Import tracklist from plain text',                                openTracklistImporter],
             ['web-import',           'Import metadata from a web store or credits from Discogs',        openWebImporter],
             ['extract-artists',      null,                                                               extractArtists],
             ['extract-featuring',    null,                                                               extractFeaturing],
-            ['extract-remixers',     null,                                                               extractRemixers],
             ['revert-last',          'Revert last action',                                              revertLastAction],
             ['revert-all',           'Revert all actions',                                              revertAllActions],
             ['brackets-to-parens',   'Convert version titles to parentheses',                          null],
@@ -12040,7 +12348,7 @@ wiIsAntiBotPage(html)) {
             if (title)   el.title   = title;
             if (handler) el.onclick = handler;
         });
-        document.getElementById('extract-artists').title = wrapTitle('Separator patterns: ' + CONFIG.ARTIST_SPLITTER_PATTERNS.join(', ') + '\nIncl. feat separators: ' + CONFIG.FEATURING_PATTERNS.join(', '));
+        document.getElementById('extract-artists').title = wrapTitle('Extract artists from track titles and add them as track artists\nSeparator patterns: ' + CONFIG.ARTIST_SPLITTER_PATTERNS.join(', ') + '\nIncl. feat separators: ' + CONFIG.FEATURING_PATTERNS.join(', '), 70);
 
         (() => {
             const _ctBtn  = document.getElementById('clean-titles');
@@ -12095,6 +12403,10 @@ wiIsAntiBotPage(html)) {
                 _ctApplyTheme(_ctDark());
                 const _capm = document.getElementById('capitalize-all-menu');
                 if (_capm) _capm.style.display = 'none';
+                ['brackets-to-parens-menu', 'extract-track-numbers-menu', 'scan-and-extract-menu', 'extract-remixers-menu'].forEach(id => {
+                    const m = document.getElementById(id);
+                    if (m) m.style.display = 'none';
+                });
             };
 
             const _ctUpdateTooltip = () => {
@@ -12143,6 +12455,158 @@ wiIsAntiBotPage(html)) {
                 _btpApplyTheme(_btpDark());
                 const _ctm = document.getElementById('clean-titles-menu');
                 if (_ctm) _ctm.style.display = 'none';
+                ['extract-track-numbers-menu', 'scan-and-extract-menu', 'extract-remixers-menu'].forEach(id => {
+                    const m = document.getElementById(id);
+                    if (m) m.style.display = 'none';
+                });
+            };
+        })();
+
+        (() => {
+            const _etnBtn    = document.getElementById('extract-track-numbers');
+            const _etnMenu   = document.getElementById('extract-track-numbers-menu');
+            const _etnBothTitle    = document.getElementById('extract-track-numbers-both-title');
+            const _etnBothArtist   = document.getElementById('extract-track-numbers-both-artist');
+            const _etnRemoveTitle  = document.getElementById('extract-track-numbers-remove-title');
+            const _etnRemoveArtist = document.getElementById('extract-track-numbers-remove-artist');
+            if (!_etnBtn || !_etnMenu) return;
+
+            const _etnDark  = () => localStorage.getItem(STORAGE_KEYS.THEME_KEY) === 'dark';
+            const _btnHover = (b) => {
+                b.addEventListener('mouseover', () => b.style.background = _etnDark() ? '#2a2d30' : '#f0f0f0');
+                b.addEventListener('mouseout',  () => b.style.background = 'transparent');
+            };
+            const _etnOptions = [
+                [_etnBothTitle,    'both',       'title'],
+                [_etnBothArtist,   'both',       'artist'],
+                [_etnRemoveTitle,  'removeOnly', 'title'],
+                [_etnRemoveArtist, 'removeOnly', 'artist'],
+            ];
+            for (const [btn, mode, target] of _etnOptions) {
+                if (!btn) continue;
+                btn.onclick = (e) => { e.stopPropagation(); _etnMenu.style.display = 'none'; extractTrackPositions(mode, target); };
+                _btnHover(btn);
+            }
+
+            const _etnApplyTheme = (isDark) => {
+                _etnMenu.style.background  = isDark ? '#1f2224' : '#fff';
+                _etnMenu.style.borderColor = isDark ? '#333' : '#ccc';
+                for (const [btn] of _etnOptions) if (btn) btn.style.color = isDark ? '#ddd' : '#111';
+            };
+            _etnApplyTheme(_etnDark());
+            document.addEventListener('dh-theme-change', (e) => _etnApplyTheme(e.detail?.dark));
+
+            document.addEventListener('click', (e) => {
+                if (_etnMenu.style.display === 'none') return;
+                if (!_etnMenu.contains(e.target) && e.target !== _etnBtn) _etnMenu.style.display = 'none';
+            });
+            _etnBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (_etnMenu.style.display !== 'none') { _etnMenu.style.display = 'none'; return; }
+                const r = _etnBtn.getBoundingClientRect();
+                _etnMenu.style.top      = r.bottom + 'px';
+                _etnMenu.style.left     = '';
+                _etnMenu.style.right    = (window.innerWidth - r.right - 7) + 'px';
+                _etnMenu.style.position = 'fixed';
+                _etnMenu.style.display  = 'flex';
+                _etnApplyTheme(_etnDark());
+                ['clean-titles-menu', 'brackets-to-parens-menu', 'scan-and-extract-menu', 'extract-remixers-menu'].forEach(id => {
+                    const m = document.getElementById(id);
+                    if (m) m.style.display = 'none';
+                });
+            };
+        })();
+
+        (() => {
+            const _saeBtn    = document.getElementById('scan-and-extract');
+            const _saeMenu   = document.getElementById('scan-and-extract-menu');
+            const _saeBoth   = document.getElementById('scan-and-extract-both');
+            const _saeRemove = document.getElementById('scan-and-extract-remove');
+            if (!_saeBtn || !_saeMenu) return;
+
+            const _saeDark  = () => localStorage.getItem(STORAGE_KEYS.THEME_KEY) === 'dark';
+            const _btnHover = (b) => {
+                b.addEventListener('mouseover', () => b.style.background = _saeDark() ? '#2a2d30' : '#f0f0f0');
+                b.addEventListener('mouseout',  () => b.style.background = 'transparent');
+            };
+            if (_saeBoth)   { _saeBoth.onclick   = (e) => { e.stopPropagation(); _saeMenu.style.display = 'none'; scanAndExtract('both'); };   _btnHover(_saeBoth); }
+            if (_saeRemove) { _saeRemove.onclick = (e) => { e.stopPropagation(); _saeMenu.style.display = 'none'; scanAndExtract('removeOnly'); }; _btnHover(_saeRemove); }
+
+            const _saeApplyTheme = (isDark) => {
+                _saeMenu.style.background  = isDark ? '#1f2224' : '#fff';
+                _saeMenu.style.borderColor = isDark ? '#333' : '#ccc';
+                if (_saeBoth)   _saeBoth.style.color   = isDark ? '#ddd' : '#111';
+                if (_saeRemove) _saeRemove.style.color = isDark ? '#ddd' : '#111';
+            };
+            _saeApplyTheme(_saeDark());
+            document.addEventListener('dh-theme-change', (e) => _saeApplyTheme(e.detail?.dark));
+
+            document.addEventListener('click', (e) => {
+                if (_saeMenu.style.display === 'none') return;
+                if (!_saeMenu.contains(e.target) && e.target !== _saeBtn) _saeMenu.style.display = 'none';
+            });
+            _saeBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (_saeMenu.style.display !== 'none') { _saeMenu.style.display = 'none'; return; }
+                const r = _saeBtn.getBoundingClientRect();
+                _saeMenu.style.top      = r.bottom + 'px';
+                _saeMenu.style.left     = '';
+                _saeMenu.style.right    = (window.innerWidth - r.right - 7) + 'px';
+                _saeMenu.style.position = 'fixed';
+                _saeMenu.style.display  = 'flex';
+                _saeApplyTheme(_saeDark());
+                ['clean-titles-menu', 'brackets-to-parens-menu', 'extract-track-numbers-menu', 'extract-remixers-menu'].forEach(id => {
+                    const m = document.getElementById(id);
+                    if (m) m.style.display = 'none';
+                });
+            };
+        })();
+
+        (() => {
+            const _erBtn        = document.getElementById('extract-remixers');
+            const _erMenu       = document.getElementById('extract-remixers-menu');
+            const _erDefault    = document.getElementById('extract-remixers-default');
+            const _erArtistOnly = document.getElementById('extract-remixers-artist-only');
+            if (!_erBtn || !_erMenu) return;
+
+            const _erDark   = () => localStorage.getItem(STORAGE_KEYS.THEME_KEY) === 'dark';
+            const _btnHover = (b) => {
+                b.addEventListener('mouseover', () => b.style.background = _erDark() ? '#2a2d30' : '#f0f0f0');
+                b.addEventListener('mouseout',  () => b.style.background = 'transparent');
+            };
+            if (_erDefault)    { _erDefault.onclick    = (e) => { e.stopPropagation(); _erMenu.style.display = 'none'; extractRemixers(false); }; _btnHover(_erDefault); }
+            if (_erArtistOnly) { _erArtistOnly.onclick = (e) => { e.stopPropagation(); _erMenu.style.display = 'none'; extractRemixersArtistOnly(); }; _btnHover(_erArtistOnly); }
+
+            updateRemixModeMenuTooltips();
+
+            const _erApplyTheme = (isDark) => {
+                _erMenu.style.background  = isDark ? '#1f2224' : '#fff';
+                _erMenu.style.borderColor = isDark ? '#333' : '#ccc';
+                if (_erDefault)    _erDefault.style.color    = isDark ? '#ddd' : '#111';
+                if (_erArtistOnly) _erArtistOnly.style.color = isDark ? '#ddd' : '#111';
+            };
+            _erApplyTheme(_erDark());
+            document.addEventListener('dh-theme-change', (e) => _erApplyTheme(e.detail?.dark));
+
+            document.addEventListener('click', (e) => {
+                if (_erMenu.style.display === 'none') return;
+                if (!_erMenu.contains(e.target) && e.target !== _erBtn) _erMenu.style.display = 'none';
+            });
+            _erBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (_erMenu.style.display !== 'none') { _erMenu.style.display = 'none'; return; }
+                const r = _erBtn.getBoundingClientRect();
+                _erMenu.style.top      = r.bottom + 'px';
+                _erMenu.style.left     = r.left + 'px';
+                _erMenu.style.right    = '';
+                _erMenu.style.width    = r.width + 'px';
+                _erMenu.style.position = 'fixed';
+                _erMenu.style.display  = 'flex';
+                _erApplyTheme(_erDark());
+                ['clean-titles-menu', 'brackets-to-parens-menu', 'extract-track-numbers-menu', 'scan-and-extract-menu'].forEach(id => {
+                    const m = document.getElementById(id);
+                    if (m) m.style.display = 'none';
+                });
             };
         })();
 
@@ -12373,6 +12837,7 @@ wiIsAntiBotPage(html)) {
         initThemeFromStorage();
         updateRemixToggleUI();
         updateRemixButtonTitle();
+        updateRemixModeMenuTooltips();
         log('Panel initialized');
         if (state.startCollapsed) {
             const content = document.getElementById('panel-content');
