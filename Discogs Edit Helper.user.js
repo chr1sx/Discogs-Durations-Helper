@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Discogs Edit Helper
 // @namespace    https://github.com/chr1sx/Discogs-Edit-Helper
-// @version      1.9.5
+// @version      1.9.6
 // @description  Imports metadata from web stores and plain-text tracklists, extracts info from titles and assigns data to the appropriate fields
 // @author       chr1sx
 // @match        https://www.discogs.com/release/edit/*
@@ -42,6 +42,7 @@
         CAPITALIZE_KEEP_UPPER: ['CIA', 'DJ', 'DNA', 'EP', 'FBI', 'FM', 'HD', 'KGB', 'LSD', 'MC', 'MI6', 'NASA', 'TNT', 'UFO', 'UK', 'USA', 'USSR', 'VIP', 'VHS', 'WTF'],
         CAPITALIZE_KEEP_LOWER: ['da', 'de', 'del', 'des', 'di', 'la', 'van', 'von'],
         MEASUREMENT_UNITS: ['mm', 'cm', 'm', 'km', 'in', 'yd', 'mi', 'kg', 'mg', 'lb', 'oz', 'ml', 'mph', 'km/h'],
+        REMIX_SKIP_TERMS: ['club', 'radio', 'extended', 'album', 'instrumental', 'vocal', 'acoustic', 'dub', 'main', 'clean', 'explicit', 'full', 'short', 'rough', 'long', 'final', 'demo', 'early', 'tv', 'video', 'single', 'promo', 'original', 'alternate', 'alternative', 'deluxe', 'special', 'bonus', 'live', 'vip'],
         CLEAN_TITLE_PATTERNS: ['original mix', 'explicit', 'previously unreleased', 'unreleased', 'digital bonus track', 'digital bonus', 'bonus track', 'bonus', '24bit', '24-bit', '24 bit', '16bit', '16-bit', '16 bit', '000 bpm']
     };
     const CONFIG_RAW = {
@@ -55,6 +56,7 @@
         CAPITALIZE_KEEP_UPPER:    ['CIA', 'DJ', 'DNA', 'EP', 'FBI', 'FM', 'HD', 'KGB', 'LSD', 'MC', 'MI6', 'NASA', 'TNT', 'UFO', 'UK', 'USA', 'USSR', 'VIP', 'VHS', 'WTF'],
         CAPITALIZE_KEEP_LOWER:    ['da', 'de', 'del', 'des', 'di', 'la', 'van', 'von'],
         MEASUREMENT_UNITS:        ['mm', 'cm', 'm', 'km', 'in', 'yd', 'mi', 'kg', 'mg', 'lb', 'oz', 'ml', 'mph', 'km/h'],
+        REMIX_SKIP_TERMS:        ['club', 'radio', 'extended', 'album', 'instrumental', 'vocal', 'acoustic', 'dub', 'main', 'clean', 'explicit', 'full', 'short', 'rough', 'long', 'final', 'demo', 'early', 'tv', 'video', 'single', 'promo', 'original', 'alternate', 'alternative', 'deluxe', 'special', 'bonus', 'live', 'vip'],
         CLEAN_TITLE_PATTERNS:     ['original mix', 'explicit', 'previously unreleased', 'unreleased', 'digital bonus track', 'digital bonus', 'bonus track', 'bonus', '24bit', '24-bit', '24 bit', '16bit', '16-bit', '16 bit', '000 bpm'],
     };
 
@@ -69,6 +71,7 @@
         CAPITALIZE_KEEP_UPPER:     [...CONFIG_RAW.CAPITALIZE_KEEP_UPPER],
         CAPITALIZE_KEEP_LOWER:     [...CONFIG_RAW.CAPITALIZE_KEEP_LOWER],
         MEASUREMENT_UNITS:         [...CONFIG_RAW.MEASUREMENT_UNITS],
+        REMIX_SKIP_TERMS:         [...CONFIG_RAW.REMIX_SKIP_TERMS],
         CLEAN_TITLE_PATTERNS:      [...CONFIG_RAW.CLEAN_TITLE_PATTERNS],
     };
 
@@ -88,6 +91,7 @@
         CFG_KEEP_UPPER:     'discogs_helper_cfg_keep_upper',
         CFG_KEEP_LOWER:     'discogs_helper_cfg_keep_lower',
         CFG_MEASUREMENT_UNITS: 'discogs_helper_cfg_measurement_units',
+        CFG_REMIX_SKIP_TERMS: 'discogs_helper_cfg_remix_skip_terms',
         CFG_CLEAN_TITLE:    'discogs_helper_cfg_clean_title',
         CFG_CAPITALIZE_FIELDS: 'discogs_helper_cfg_capitalize_fields_v1',
         CFG_CAPITALIZE_BTN_FIELDS: 'discogs_helper_cfg_capitalize_btn_fields_v1',
@@ -189,6 +193,9 @@
 
         const measurementUnits = parseStoredArray(STORAGE_KEYS.CFG_MEASUREMENT_UNITS);
         if (measurementUnits) CONFIG.MEASUREMENT_UNITS = measurementUnits;
+
+        const remixSkipTerms = parseStoredArray(STORAGE_KEYS.CFG_REMIX_SKIP_TERMS);
+        if (remixSkipTerms) CONFIG.REMIX_SKIP_TERMS = remixSkipTerms;
 
         const cleanTitle = parseStoredArray(STORAGE_KEYS.CFG_CLEAN_TITLE);
         if (cleanTitle) CONFIG.CLEAN_TITLE_PATTERNS = cleanTitle;
@@ -734,6 +741,15 @@
         } catch (e) {}
     }
 
+    function stripTrailingSeparators(s) {
+        s = s.replace(/[\s\-\:;,]+$/g, '');
+        if (!/(?:^|[\s.])[A-Za-z]{1,3}\.$/.test(s)) {
+            s = s.replace(/\.+$/, '');
+            s = s.replace(/[\s\-\:;,]+$/g, '');
+        }
+        return s;
+    }
+
     function cleanupArtistName(str, preserveWrapping = false) {
         if (!str) return '';
         let s = String(str).trim();
@@ -752,7 +768,7 @@
             }
             const isColonWrapped = /^:/.test(s) && /:$/.test(s);
             s = s.replace(/^[\s\(\-:\.]+/, '');
-            s = s.replace(/[\s\-\:;,\.]+$/g, '');
+            s = stripTrailingSeparators(s);
             if (isColonWrapped) s = ':' + s.replace(/:$/, '') + ':';
             return s;
         }
@@ -764,7 +780,7 @@
         }
         const isColonWrapped2 = /^:/.test(s) && /:$/.test(s);
         s = s.replace(/^[\s\(\-:\.]+/, '');
-        s = s.replace(/[\s\-\:;,\.]+$/g, '');
+        s = stripTrailingSeparators(s);
         if (isColonWrapped2) s = ':' + s.replace(/:$/, '') + ':';
         if (s.startsWith('(') && s.endsWith(')')) {
             s = s.slice(1, -1).trim();
@@ -1592,11 +1608,36 @@
         }
     }
 
+    function tracksAppearUnsplit(titles) {
+        const nonEmpty = titles.map(t => (t || '').trim()).filter(Boolean);
+        if (nonEmpty.length === 0) return false;
+        return nonEmpty.every(t => /\s[-\u2013\u2014]\s/.test(t));
+    }
+
+    function isInsideBracketsAt(text, index) {
+        let depthParen = 0, depthBracket = 0;
+        for (let i = 0; i < index; i++) {
+            if (text[i] === '(') depthParen++;
+            else if (text[i] === ')') depthParen = Math.max(0, depthParen - 1);
+            else if (text[i] === '[') depthBracket++;
+            else if (text[i] === ']') depthBracket = Math.max(0, depthBracket - 1);
+        }
+        return depthParen > 0 || depthBracket > 0;
+    }
+
     async function extractFeaturing(silent = false) {
         if (typeof silent !== 'boolean') silent = false;
         await setInfoProcessing();
-        if (!silent) log('Starting feat artist extraction...', 'info');
         let trackRows = getTrackInputRows();
+        const allTitlesForUnsplitCheck = trackRows.map(row => {
+            const ti = row.querySelector('input[data-type="track-title"], input[id*="track-title"]');
+            return ti ? ti.value : '';
+        });
+        const tracksLookUnsplit = silent && tracksAppearUnsplit(allTitlesForUnsplitCheck);
+        if (tracksLookUnsplit) {
+            log('Titles look like unsplit Artist - Title; only extracting feat. mentions inside parentheses/brackets.', 'info');
+        }
+        if (!silent) log('Starting feat artist extraction...', 'info');
         let processed = 0;
         let foundButAlreadyEntered = 0;
         const historyChanges = [];
@@ -1619,12 +1660,13 @@
             if (!titleInput) continue;
             const originalTitle = titleInput.value.trim();
 
-            const featSearchRegex = new RegExp(`(${featPattern})\\s*(.*?)(?=\\b(?:${remixTerminatorPattern})\\b|[\\(\\)\\[\\]]|$)`, 'gi');
+            const featSearchRegex = new RegExp(`(${featPattern})\\s*(.*?)(?=\\s[-\u2013\u2014]\\s|\\b(?:${remixTerminatorPattern})\\b|[\\(\\)\\[\\]]|$)`, 'gi');
 
             let match;
             let foundInThisTrack = false;
 
             while ((match = featSearchRegex.exec(originalTitle)) !== null) {
+                if (tracksLookUnsplit && !isInsideBracketsAt(originalTitle, match.index)) continue;
                 let featArtistsText = match[2].trim();
                 if (!featArtistsText) continue;
 
@@ -2613,6 +2655,12 @@
         }
     }
 
+    function isNonArtistRemixTerm(name) {
+        const n = String(name || '').replace(/^[\(\[]+|[\)\]]+$/g, '').trim().toLowerCase();
+        if (!n) return false;
+        return CONFIG.REMIX_SKIP_TERMS.some(t => t.toLowerCase() === n);
+    }
+
     async function extractRemixers(optionalOnly = false, silent = false) {
         if (typeof optionalOnly !== 'boolean') optionalOnly = false;
         await setInfoProcessing();
@@ -2894,8 +2942,9 @@
                 }
             }
 
-            if (remixersForThisTrack.length > 0) {
-                remixersByTrack.push({ row, titleInput, remixers: remixersForThisTrack, trackIndex: i });
+            const filteredRemixersForThisTrack = remixersForThisTrack.filter(r => !isNonArtistRemixTerm(r));
+            if (filteredRemixersForThisTrack.length > 0) {
+                remixersByTrack.push({ row, titleInput, remixers: filteredRemixersForThisTrack, trackIndex: i });
             }
         }
 
@@ -3009,8 +3058,9 @@
                 });
             }
 
-            if (remixersForThisTrack.length > 0) {
-                remixersByTrack.push({ row, titleInput, remixers: remixersForThisTrack, trackIndex: i });
+            const filteredRemixersForThisTrack = remixersForThisTrack.filter(r => !isNonArtistRemixTerm(r));
+            if (filteredRemixersForThisTrack.length > 0) {
+                remixersByTrack.push({ row, titleInput, remixers: filteredRemixersForThisTrack, trackIndex: i });
             }
         }
 
@@ -3731,6 +3781,12 @@
                 getValue: () => CONFIG_RAW.REMIX_PATTERNS_OPTIONAL.join('; '),
             },
             {
+                id: 'cfg-remix-skip',
+                label: 'Remix Skip Terms',
+                desc: 'Ignored as remixer names (e.g. "Club Remix" won\'t extract "Club")',
+                getValue: () => CONFIG.REMIX_SKIP_TERMS.join('; '),
+            },
+            {
                 id: 'cfg-keep-upper',
                 label: 'Always Uppercase',
                 desc: 'Words always in uppercase when capitalizing',
@@ -3936,6 +3992,7 @@
             const remix          = parseField('cfg-remix');
             const remixBy        = parseField('cfg-remix-by');
             const remixOpt       = parseField('cfg-remix-opt');
+            const remixSkip      = parseField('cfg-remix-skip');
             const keepUpper      = parseField('cfg-keep-upper');
             const keepLower      = parseField('cfg-keep-lower');
             const measurementUnits = parseField('cfg-measurement-units');
@@ -3947,6 +4004,7 @@
             if (remix.length)       { CONFIG_RAW.REMIX_PATTERNS = remix;                 saveArrayToStorage(STORAGE_KEYS.CFG_REMIX,      remix); }
             if (remixBy.length)     { CONFIG_RAW.REMIX_BY_PATTERNS = remixBy;            saveArrayToStorage(STORAGE_KEYS.CFG_REMIX_BY,   remixBy); }
             if (remixOpt.length)    { CONFIG_RAW.REMIX_PATTERNS_OPTIONAL = remixOpt;     saveArrayToStorage(STORAGE_KEYS.CFG_REMIX_OPT,  remixOpt); }
+            if (remixSkip.length)   { CONFIG.REMIX_SKIP_TERMS = remixSkip;               saveArrayToStorage(STORAGE_KEYS.CFG_REMIX_SKIP_TERMS, remixSkip); }
             if (keepUpper.length)   { CONFIG.CAPITALIZE_KEEP_UPPER = keepUpper;          saveArrayToStorage(STORAGE_KEYS.CFG_KEEP_UPPER, keepUpper); }
             if (keepLower.length)   { CONFIG.CAPITALIZE_KEEP_LOWER = keepLower;          saveArrayToStorage(STORAGE_KEYS.CAPITALIZE_KEEP_LOWER, keepLower); }
             if (measurementUnits.length) { CONFIG.MEASUREMENT_UNITS = measurementUnits;  saveArrayToStorage(STORAGE_KEYS.CFG_MEASUREMENT_UNITS, measurementUnits); }
@@ -3983,6 +4041,7 @@
             CONFIG_RAW.REMIX_PATTERNS          = [...CONFIG_DEFAULTS.REMIX_PATTERNS];
             CONFIG_RAW.REMIX_BY_PATTERNS       = [...CONFIG_DEFAULTS.REMIX_BY_PATTERNS];
             CONFIG_RAW.REMIX_PATTERNS_OPTIONAL = [...CONFIG_DEFAULTS.REMIX_PATTERNS_OPTIONAL];
+            CONFIG.REMIX_SKIP_TERMS            = [...CONFIG_DEFAULTS.REMIX_SKIP_TERMS];
 
             CONFIG.ARTIST_SPLITTER_PATTERNS  = [...CONFIG_DEFAULTS.ARTIST_SPLITTER_PATTERNS];
             CONFIG.CREDIT_SEPARATOR_PATTERNS = [...CONFIG_DEFAULTS.CREDIT_SEPARATOR_PATTERNS];
@@ -4009,7 +4068,7 @@
             const keys = [
                 STORAGE_KEYS.CFG_FEATURING, STORAGE_KEYS.CFG_REMIX, STORAGE_KEYS.CFG_REMIX_BY,
                 STORAGE_KEYS.CFG_REMIX_OPT, STORAGE_KEYS.CFG_SPLITTER, STORAGE_KEYS.CFG_CREDIT_SEP, STORAGE_KEYS.CFG_KEEP_UPPER,
-                STORAGE_KEYS.CFG_KEEP_LOWER, STORAGE_KEYS.CFG_MEASUREMENT_UNITS, STORAGE_KEYS.CFG_CLEAN_TITLE,
+                STORAGE_KEYS.CFG_KEEP_LOWER, STORAGE_KEYS.CFG_MEASUREMENT_UNITS, STORAGE_KEYS.CFG_REMIX_SKIP_TERMS, STORAGE_KEYS.CFG_CLEAN_TITLE,
                 STORAGE_KEYS.CFG_TIMEOUT, STORAGE_KEYS.CFG_START_COLLAPSED, STORAGE_KEYS.CFG_CAPITALIZE_FIELDS, STORAGE_KEYS.CFG_CAPITALIZE_BTN_FIELDS, STORAGE_KEYS.CFG_SPLIT_IMPORT, STORAGE_KEYS.CFG_IMPORT_CREDITS, STORAGE_KEYS.CFG_IMPORT_STYLES, STORAGE_KEYS.CFG_IMPORT_AUTO_REMIXERS, STORAGE_KEYS.CFG_IMPORT_AUTO_FEAT, STORAGE_KEYS.CFG_CAPITALIZE_MIXED, STORAGE_KEYS.CFG_IMPORT_AUTO_DESCR, STORAGE_KEYS.CFG_IMPORT_COUNTRY
             ];
             keys.forEach(k => { try { localStorage.removeItem(k); } catch(e) {} });
@@ -9856,6 +9915,10 @@ function wiConvertImageToJpeg(blob, maxDim = 600) {
     }
 
     function extractFeaturingFromTracks(tracks) {
+        const tracksLookUnsplit = tracksAppearUnsplit(tracks.map(t => t.title || ''));
+        if (tracksLookUnsplit) {
+            log('Titles look like unsplit Artist - Title; only extracting feat. mentions inside parentheses/brackets.', 'info');
+        }
         const featPattern = buildFeaturingPattern();
         const remixTerminatorPattern = getAllRemixTokensRegex();
         const results = [];
@@ -9870,9 +9933,10 @@ function wiConvertImageToJpeg(blob, maxDim = 600) {
             if (!title) continue;
             const pos = tracks[i].position || String(i + 1);
             const seen = new Set();
-            const featSearchRegex = new RegExp(`(${featPattern})\\s*(.*?)(?=\\b(?:${remixTerminatorPattern})\\b|[\\(\\)\\[\\]]|$)`, 'gi');
+            const featSearchRegex = new RegExp(`(${featPattern})\\s*(.*?)(?=\\s[-\u2013\u2014]\\s|\\b(?:${remixTerminatorPattern})\\b|[\\(\\)\\[\\]]|$)`, 'gi');
             let match;
             while ((match = featSearchRegex.exec(title)) !== null) {
+                if (tracksLookUnsplit && !isInsideBracketsAt(title, match.index)) continue;
                 let featArtistsText = match[2].trim();
                 if (!featArtistsText) continue;
                 const parts = splitArtistsByConfiguredPatterns(featArtistsText);
